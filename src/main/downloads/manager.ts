@@ -136,7 +136,11 @@ export class DownloadManager extends EventEmitter {
   async analyzeDetected(item: DetectedMedia): Promise<AnalyzeResult> {
     const hdrs = await this.enrichHeaders(item.url, item.headers, item.pageUrl)
     if (item.kind === 'hls') return this.analyzeHls(item.url, hdrs, item.pageUrl, item.pageTitle)
-    if (item.kind === 'dash') return this.analyzeYtdlp(item.url, hdrs, item.pageUrl)
+    if (item.kind === 'dash' || item.kind === 'page') return this.analyzeYtdlp(item.url, hdrs, item.pageUrl)
+    if (item.found === 'scan') {
+      // 페이지에서 긁은 주소는 실제로 받을 수 있는지 먼저 확인한다
+      return this.analyze(item.url, hdrs, item.pageUrl, item.pageTitle)
+    }
     return {
       kind: 'file',
       url: item.url,

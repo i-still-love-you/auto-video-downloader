@@ -10,6 +10,7 @@ import {
   type FileEntry,
   type NavigateEvent,
   type Rect,
+  type ScanPayload,
   type Settings,
   type ToolName
 } from '@shared/types'
@@ -75,6 +76,14 @@ export function registerIpc(d: IpcDeps): void {
 
   d.tabs.on('state', (s) => send(IPC.browser.evState, s))
   d.sniffer.on('detected', (item: DetectedMedia) => send(IPC.browser.evDetected, item))
+
+  // ---------- 페이지 스캔 (탭 preload 에서 옴) ----------
+  handle(IPC.scan.config, () => getSettings().pageScan)
+  ipcMain.on(IPC.scan.found, (event, payload: ScanPayload) => {
+    if (!getSettings().pageScan.enabled) return
+    const tabId = event.sender.id
+    if (d.tabs.hasTab(tabId)) d.sniffer.addScanned(tabId, payload)
+  })
   d.tabs.on('focusAddress', () => {
     d.win.webContents.focus()
     navigate({ page: 'browser', focusAddress: true })

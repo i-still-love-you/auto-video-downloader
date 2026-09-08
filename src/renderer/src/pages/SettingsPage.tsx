@@ -154,6 +154,19 @@ export function SettingsPage({ active }: { active: boolean }): React.JSX.Element
         </section>
 
         <section className="settings-section">
+          <h3>동영상 감지</h3>
+          <label className="checkbox">
+            <input type="checkbox" checked={s.pageScan.enabled} onChange={(e) => void saveSettings({ pageScan: { ...s.pageScan, enabled: e.target.checked } })} />
+            페이지 스캔으로 재생 전에 동영상 주소 찾기 (video 태그, 메타 태그, JSON-LD, 인라인 스크립트, 임베드 iframe)
+          </label>
+          <label className="checkbox mt-8">
+            <input type="checkbox" checked={s.pageScan.autoLoadMetadata} disabled={!s.pageScan.enabled} onChange={(e) => void saveSettings({ pageScan: { ...s.pageScan, autoLoadMetadata: e.target.checked } })} />
+            주소가 있는 video 태그의 메타데이터를 자동으로 요청해 감지 (재생 없이 헤더만 받음)
+          </label>
+          <span className="hint">스캔 설정은 새로 여는 페이지부터 적용됩니다. 네트워크 응답 기반 감지는 항상 동작합니다.</span>
+        </section>
+
+        <section className="settings-section">
           <h3>브라우저</h3>
           <div className="row wrap" style={{ gap: 20 }}>
             <div className="field">

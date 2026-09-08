@@ -93,6 +93,12 @@ async function createWindow(): Promise<void> {
   browserSession.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(['fullscreen', 'pointerLock', 'clipboard-sanitized-write'].includes(permission))
   })
+  // 재생 전 동영상 주소를 찾는 페이지 스캔 preload (모든 프레임)
+  try {
+    browserSession.registerPreloadScript({ type: 'frame', filePath: path.join(__dirname, '../preload/scan.js') })
+  } catch (e) {
+    console.error('scan preload 등록 실패', e)
+  }
 
   // 세션당 webRequest 리스너는 이벤트마다 하나뿐이므로 광고 차단기와 감지기를 한 리스너에서 합쳐 호출한다
   const sniffer = new Sniffer(browserSession, (id) => tabs?.hasTab(id) ?? false)

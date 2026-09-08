@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import path from 'node:path'
 import { webContents, type OnHeadersReceivedListenerDetails, type Session } from 'electron'
-import type { DetectedMedia, MediaKind } from '@shared/types'
+import type { DetectedMedia, MediaKind, ScanPayload } from '@shared/types'
 import { basenameOfUrl, extOfUrl, isMediaExt, mimeFromExt, newId, parseContentDisposition } from '../util'
 import { cookieHeaderFor } from '../downloads/net'
 import { getSettings } from '../settings'
@@ -131,9 +131,21 @@ export class Sniffer extends EventEmitter {
     this.seen.set(tabId, seen)
     if (seen.has(details.url)) {
       const existing = this.byTab.get(tabId)?.find((x) => x.url === details.url)
-      if (existing && existing.size === null && c.size !== null) {
-        existing.size = c.size
-        this.emit('changed', tabId)
+      if (existing) {
+        let changed = false
+        if (existing.size === null && c.size !== null) {
+          existing.size = c.size
+          changed = true
+        }
+        if (existing.found === 'scan') {
+          // 스캔으로 먼저 찾은 항목이 실제로 요청되면 정확한 정보로 갱신
+          existing.found = 'network'
+          existing.mime = c.mime
+          existing.kind = c.kind
+          if (c.filename) existing.filename = c.filename
+          changed = true
+        }
+        if (changed) this.emit('changed', tabId)
       }
       return
     }
@@ -160,25 +172,67 @@ export class Sniffer extends EventEmitter {
       pageUrl,
       pageTitle,
       headers,
-      detectedAt: Date.now()
+      detectedAt: Date.now(),
+      found: 'network'
     }
+    this.pushItem(item)
+  }
 
+  private pushItem(item: DetectedMedia): void {
     const finish = (): void => {
-      const list = this.byTab.get(tabId) ?? []
-      this.byTab.set(tabId, list)
+      const list = this.byTab.get(item.tabId) ?? []
+      this.byTab.set(item.tabId, list)
       list.push(item)
       if (list.length > MAX_PER_TAB) list.splice(0, list.length - MAX_PER_TAB)
       this.emit('detected', item)
-      this.emit('changed', tabId)
+      this.emit('changed', item.tabId)
     }
-
-    if (headers.Cookie) finish()
+    if (item.headers.Cookie) finish()
     else
-      cookieHeaderFor(this.session, details.url)
+      cookieHeaderFor(this.session, item.url)
         .then((ck) => {
           if (ck) item.headers.Cookie = ck
         })
         .finally(finish)
+  }
+
+  /** 페이지 스캔 preload 가 찾은 후보를 감지 목록에 합친다. */
+  addScanned(tabId: number, payload: ScanPayload): void {
+    if (!this.isTab(tabId) || !payload || !Array.isArray(payload.items)) return
+    const wc = webContents.fromId(tabId)
+    if (!wc || wc.isDestroyed()) return
+    const seen = this.seen.get(tabId) ?? new Set<string>()
+    this.seen.set(tabId, seen)
+    const pageUrl = typeof payload.pageUrl === 'string' ? payload.pageUrl : wc.getURL()
+    const pageTitle = wc.getTitle() || (typeof payload.title === 'string' ? payload.title : '')
+    let added = 0
+    for (const raw of payload.items.slice(0, 50)) {
+      if (!raw || typeof raw.url !== 'string' || !/^https?:\/\//i.test(raw.url)) continue
+      if (!['file', 'hls', 'dash', 'page'].includes(raw.kind)) continue
+      if (seen.has(raw.url)) continue
+      if (seen.size >= MAX_PER_TAB) break
+      seen.add(raw.url)
+      const ext = extOfUrl(raw.url)
+      const item: DetectedMedia = {
+        id: newId(),
+        tabId,
+        url: raw.url,
+        kind: raw.kind,
+        mime: raw.kind === 'hls' ? 'application/vnd.apple.mpegurl' : raw.kind === 'dash' ? 'application/dash+xml' : raw.kind === 'page' ? 'text/html' : mimeFromExt(ext || 'mp4'),
+        size: null,
+        filename: raw.kind !== 'page' && isMediaExt(ext) ? basenameOfUrl(raw.url) : null,
+        pageUrl,
+        pageTitle,
+        headers: { Referer: pageUrl, 'User-Agent': this.session.getUserAgent() },
+        detectedAt: Date.now(),
+        found: 'scan',
+        source: typeof raw.source === 'string' ? raw.source.slice(0, 20) : undefined,
+        poster: typeof raw.poster === 'string' && /^https?:\/\//i.test(raw.poster) ? raw.poster : undefined
+      }
+      this.pushItem(item)
+      added++
+    }
+    if (added) this.emit('changed', tabId)
   }
 
   getDetected(tabId?: number): DetectedMedia[] {

@@ -563,6 +563,20 @@ a {
   background: #5a3b2a;
   color: #ffc39c;
 }
+.kind.page {
+  background: #4a3d1f;
+  color: #f2d58a;
+}
+.scan-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 15px;
+}
 
 .list-item {
   display: flex;

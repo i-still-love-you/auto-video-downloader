@@ -524,6 +524,15 @@ export function BrowserPage(): React.JSX.Element {
           <section className="video-panel">
             <header>
               <span className="grow">감지된 동영상{activeDetected.length > 0 ? ` (${activeDetected.length})` : ''}</span>
+              {active?.url && (
+                <button
+                  className="btn sm ghost"
+                  title="현재 페이지 주소를 yt-dlp 로 분석해 재생 없이 화질 목록을 가져옵니다"
+                  onClick={() => requestAnalyze({ url: active.url, pageUrl: active.url, pageTitle: active.title })}
+                >
+                  <Icon name="search" size={13} /> 이 페이지 분석
+                </button>
+              )}
               {active && activeDetected.length > 0 && (
                 <button className="btn sm ghost" onClick={() => void window.api.browser.clearDetected(active.id).then(() => setDetected((p) => ({ ...p, [active.id]: [] })))}>
                   비우기
@@ -546,15 +555,25 @@ export function BrowserPage(): React.JSX.Element {
                     return (
                       <div key={m.id} className={`media-item ${done ? 'downloaded' : ''}`}>
                         <div className="head">
-                          <Thumb source={m.kind === 'dash' ? null : { kind: 'remote', url: m.url, headers: m.headers }} width={96} height={54} />
+                          <Thumb
+                            source={m.poster ? { kind: 'url', url: m.poster } : m.kind === 'dash' || m.kind === 'page' ? null : { kind: 'remote', url: m.url, headers: m.headers }}
+                            width={96}
+                            height={54}
+                            icon={m.kind === 'page' ? 'globe' : 'film'}
+                          />
                           <div>
                             <div className="name">
-                              <span className={`kind ${m.kind}`}>{m.kind === 'file' ? (m.mime.split('/')[1] ?? 'file') : m.kind}</span>
-                              {m.filename || m.pageTitle || hostOf(m.url)}
+                              <span className={`kind ${m.kind}`}>{m.kind === 'file' ? (m.mime.split('/')[1] ?? 'file') : m.kind === 'page' ? 'embed' : m.kind}</span>
+                              {m.filename || (m.kind === 'page' ? hostOf(m.url) : m.pageTitle || hostOf(m.url))}
                             </div>
                             <div className="meta">
                               {m.size ? `${formatBytes(m.size)} · ` : ''}
                               {hostOf(m.url)}
+                              {m.found === 'scan' && (
+                                <span className="scan-tag" title={`재생 전에 페이지에서 찾은 주소 (${m.source ?? 'scan'})`}>
+                                  페이지에서 발견
+                                </span>
+                              )}
                             </div>
                             {done && (
                               <div className="dl-badge done" title={existing?.filePath}>
@@ -576,7 +595,7 @@ export function BrowserPage(): React.JSX.Element {
                           <button className="btn sm quick" disabled={busy || inProgress} onClick={() => void quickDownload(m)} title="분석 창 없이 기본 화질 설정으로 바로 다운로드">
                             <Icon name="bolt" size={13} /> {busy ? '준비 중' : '바로 받기'}
                           </button>
-                          {m.kind !== 'dash' && (
+                          {m.kind !== 'dash' && m.kind !== 'page' && (
                             <button className="btn sm" onClick={() => void playDetected(m)}>
                               <Icon name="play" size={13} /> 재생
                             </button>

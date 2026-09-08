@@ -1,6 +1,7 @@
 // 메인 프로세스와 렌더러가 함께 사용하는 타입 정의
 
-export type MediaKind = 'file' | 'hls' | 'dash'
+/** page = 임베드/페이지 주소 (yt-dlp 로 분석) */
+export type MediaKind = 'file' | 'hls' | 'dash' | 'page'
 
 export interface DetectedMedia {
   id: string
@@ -14,6 +15,29 @@ export interface DetectedMedia {
   pageTitle: string
   headers: Record<string, string>
   detectedAt: number
+  /** network = 실제 요청에서 감지, scan = 페이지 DOM/스크립트 스캔에서 발견 */
+  found: 'network' | 'scan'
+  /** 스캔 출처 (video, meta, jsonld, script, link, iframe, data) */
+  source?: string
+  poster?: string
+}
+
+export interface ScanItem {
+  url: string
+  kind: MediaKind
+  source: string
+  poster?: string
+}
+
+export interface ScanPayload {
+  pageUrl: string
+  title: string
+  items: ScanItem[]
+}
+
+export interface PageScanSettings {
+  enabled: boolean
+  autoLoadMetadata: boolean
 }
 
 export interface TabState {
@@ -254,6 +278,7 @@ export interface Settings {
   interceptBrowserDownloads: boolean
   adblock: AdblockSettings
   popupBlock: PopupBlockSettings
+  pageScan: PageScanSettings
 }
 
 export interface AppNotification {

@@ -68,6 +68,10 @@ export const IPC = {
   player: {
     proxyUrl: 'player:proxyUrl'
   },
+  scan: {
+    found: 'scan:found',
+    config: 'scan:config'
+  },
   adblock: {
     status: 'adblock:status',
     setEnabled: 'adblock:setEnabled',
