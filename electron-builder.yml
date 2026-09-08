@@ -1,0 +1,56 @@
+appId: com.d9.videodownloader
+productName: Video Downloader
+copyright: Copyright © 2026 d9
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+extraResources:
+  - from: resources/bin
+    to: bin
+    filter:
+      - '**/*'
+      - '!.gitkeep'
+asar: true
+compression: normal
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
+  # 코드 서명: 환경 변수 CSC_LINK(.pfx 경로 또는 base64), CSC_KEY_PASSWORD 를 설정하면 자동 서명됩니다.
+  # EV 인증서/Azure Trusted Signing 은 signtoolOptions 또는 azureSignOptions 로 지정하세요.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  shortcutName: Video Downloader
+  artifactName: ${productName}-${version}-setup.${ext}
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.utilities
+  hardenedRuntime: true
+  # 공증(notarize)은 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID 환경 변수로 설정합니다.
+
+linux:
+  target:
+    - AppImage
+  category: Utility
+
+# 자동 업데이트(electron-updater)용 배포 대상. GitHub Releases 에 업로드하려면 owner/repo 를 본인 계정으로 바꾸고
+# GH_TOKEN 환경 변수를 설정한 뒤 `npx electron-builder --win --publish always` 를 실행하세요.
+publish:
+  provider: github
+  owner: i-still-love-you
+  repo: auto-video-downloader
+  releaseType: release

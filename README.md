@@ -1,0 +1,101 @@
+# Video Downloader (PC)
+
+내장 브라우저로 웹 페이지의 동영상 소스를 자동 감지해 내려받는 데스크톱 앱입니다. Electron + TypeScript + React 로 만들었으며
+Windows / macOS / Linux 에서 동작합니다. 모바일 비디오 다운로더 앱의 기능 구성을 PC 환경에 맞게 옮긴 것입니다.
+
+## 주요 기능
+
+| 영역 | 내용 |
+| --- | --- |
+| 동영상 자동 감지 | 내장 브라우저(WebContentsView)의 네트워크 응답을 감시해 m3u8(HLS), mpd(DASH), mp4/webm/mkv/mov/flv 등 직접 파일을 찾아냅니다. Referer / Cookie / User-Agent 를 함께 저장해 다운로드 시 그대로 전달합니다. |
+| 다운로드 엔진 | 직접 파일: Range 기반 멀티 연결 다운로드 + 상태 파일로 이어받기. HLS: 자체 m3u8 파서(마스터/미디어, AES-128, EXT-X-MAP, BYTERANGE, 별도 오디오 그룹) + 병렬 세그먼트 다운로드 + ffmpeg 병합. 페이지 주소/DASH: yt-dlp 위임. |
+| 화질 선택 | HLS 변형(해상도/비트레이트)과 yt-dlp 형식 목록에서 고르거나, 설정의 기본 화질(최고/1080p/720p/480p/최저)로 자동 선택합니다. |
+| 큐 관리 | 동시 다운로드 수 제한, 일시정지/재개/취소/재시도, 속도·남은 시간·세그먼트 진행률, 로그 보기, 파일 열기/폴더에서 보기. |
+| 내장 브라우저 | 탭, 주소창, 12개 검색엔진, 즐겨찾기, 방문 기록, 우클릭 메뉴(동영상 다운로드, 새 탭에서 열기), 단축키(Ctrl+T/W/L/R, Alt+←/→, F12). 브라우저의 파일 다운로드도 관리자로 가로챕니다. |
+| 내장 플레이어 | 다운로드 전 온라인 재생(HLS 는 hls.js + 프록시), 로컬 파일 재생, 배속(0.5x~3x), 화면 회전, 반복, 전체 화면, 재생 목록. |
+| 파일 관리자 | 다운로드 폴더 목록, 재생, 이름 변경, 휴지통 삭제, 개인 폴더로 이동. |
+| 개인 폴더 | PIN(scrypt) 으로 보호되는 AES-256-GCM 암호화 폴더. 추가/재생/내보내기/삭제/PIN 변경. |
+| 설정 | 저장 폴더, 동시 다운로드 수, 연결 수, 기본 화질, MP4 변환, 감지 최소 크기, 검색엔진, 홈페이지, 도구 경로, 자동 업데이트. |
+| 도구 자동 설치 | 설정 > 도구에서 yt-dlp / ffmpeg 를 내려받아 사용자 데이터 폴더에 설치합니다. PATH 나 앱 번들의 바이너리도 자동 탐색합니다. |
+| 배포 | electron-builder(NSIS / DMG / AppImage) + electron-updater 자동 업데이트 설정. |
+
+## 요구 사항
+
+- Node.js 20 이상 (개발 환경은 Node 24 로 검증)
+- yt-dlp, ffmpeg: 필수는 아니지만 사이트 페이지 주소 분석(yt-dlp)과 HLS 병합/MP4 변환(ffmpeg)에 필요합니다. 앱 안에서 자동 설치할 수 있습니다.
+- Windows 10 이상 / macOS 11 이상 / 최신 Linux
+
+## 개발
+
+```bash
+npm install
+npm run dev        # Vite 개발 서버 + Electron 실행 (HMR)
+npm run typecheck  # 메인/프리로드/렌더러 타입 검사
+npm run build      # out/ 에 번들 생성
+npm run preview    # 빌드 결과로 Electron 실행
+```
+
+## 배포 패키지 만들기
+
+```bash
+npm run fetch-tools   # yt-dlp / ffmpeg 를 resources/bin 에 내려받아 설치 파일에 동봉 (선택)
+npm run dist:win      # dist/ 에 NSIS 설치 파일 생성
+npm run dist:mac      # DMG / ZIP
+npm run dist:linux    # AppImage
+```
+
+- 아이콘은 `build/icon.png`, `build/icon.ico` 입니다. 바꾸려면 같은 이름으로 교체하세요.
+- 코드 서명(Windows): 환경 변수 `CSC_LINK`(.pfx 경로 또는 base64) 와 `CSC_KEY_PASSWORD` 를 설정하면 electron-builder 가 자동으로 서명합니다.
+- 공증(macOS): `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` 를 설정합니다.
+- 자동 업데이트: `electron-builder.yml` 의 `publish.owner` 를 본인 GitHub 계정으로 바꾸고 `GH_TOKEN` 을 설정한 뒤
+  `npx electron-builder --win --publish always` 로 릴리스에 올리면 설치된 앱이 시작 시 업데이트를 확인합니다.
+
+## 프로젝트 구조
+
+```
+src/
+  shared/            메인·렌더러 공용 타입과 IPC 채널 이름
+  preload/           contextBridge 로 노출하는 window.api
+  main/
+    index.ts         앱 부트스트랩, 창 생성, 세션/권한, 종료 처리
+    ipc.ts           모든 IPC 핸들러
+    protocols.ts     media:// (로컬 파일 Range 스트리밍), mproxy:// (헤더 포함 원격 프록시, m3u8 URL 재작성)
+    settings.ts      설정 저장소
+    browser/
+      tabs.ts        WebContentsView 탭 관리, 단축키, 우클릭 메뉴, HTML 전체 화면
+      sniffer.ts     webRequest 기반 동영상 감지와 분류 규칙
+    downloads/
+      manager.ts     큐/상태/속도 계산/영속화, URL 분석 라우팅
+      net.ts         다운로드용 fetch, 세션 쿠키 → 헤더/Netscape 파일
+      engines/
+        http.ts      멀티 연결 + 이어받기
+        hls.ts       m3u8 파서 + 세그먼트 다운로드 + AES-128 복호화 + ffmpeg 병합
+        ytdlp.ts     yt-dlp 분석/다운로드, 진행률 파싱
+        ffmpeg.ts    리먹스/병합 실행
+    vault/vault.ts   PIN 보호 암호화 폴더
+    tools/binaries.ts 도구 탐색/버전/자동 설치
+    storage/         JSON 저장소, 방문 기록/즐겨찾기
+    updater.ts       electron-updater 연동
+    smoke.ts         VDL_SMOKE=1 자동 점검 모드
+  renderer/src/
+    App.tsx          사이드바 + 페이지 전환
+    pages/           Browser, Downloads, Files, Player, Vault, Settings
+    components/      AnalyzeDialog(화질/형식 선택), Modal, Toasts, Icon
+    state/AppContext.tsx  페이지, 토스트, 설정, 플레이어 큐, 분석 요청
+```
+
+## 동작 원리 요약
+
+1. 브라우저 탭은 별도 세션(`persist:browser`)에서 동작하며, 이 세션의 `webRequest.onHeadersReceived` 에서 Content-Type 과 URL 확장자를 보고
+   HLS/DASH/직접 파일을 분류합니다. 세그먼트(.ts/.m4s)나 작은 파일은 걸러냅니다.
+2. 감지 항목의 "다운로드" 를 누르면 메인 프로세스가 재생목록을 분석해 화질 목록을 돌려주고, 선택 결과로 작업을 큐에 넣습니다.
+3. 작업은 엔진(http / hls / ytdlp)이 실행하며, 진행률은 250ms 단위로 렌더러에 전달되고 JSON 파일에 저장되어 앱을 다시 켜도 이어받을 수 있습니다.
+4. 온라인 재생은 `mproxy://` 프로토콜이 저장된 헤더로 원본을 대신 받아오고, m3u8 안의 주소를 프록시 주소로 바꿔 hls.js 가 CORS 없이 재생하게 합니다.
+5. 로컬 파일 재생은 `media://` 프로토콜이 Range 요청을 지원하며 다운로드 폴더와 개인 폴더 임시 파일만 허용합니다.
+
+## 제한 사항과 안내
+
+- DRM(Widevine, FairPlay, SAMPLE-AES 등) 으로 보호된 콘텐츠는 감지 단계에서 제외되거나 오류로 처리되며 지원하지 않습니다.
+- 라이브(종료되지 않은) HLS 스트림은 다운로드 대상이 아닙니다.
+- 내장 플레이어는 Chromium 이 디코딩할 수 있는 코덱만 재생합니다. 그 외 형식은 "기본 프로그램으로 열기" 를 사용하세요.
+- 콘텐츠의 저작권과 각 사이트의 이용 약관을 준수해 주세요. 개인적인 용도로만 사용하시기 바랍니다.
