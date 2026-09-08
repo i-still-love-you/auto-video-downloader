@@ -45,7 +45,7 @@ export function App(): React.JSX.Element {
           </button>
         ))}
         <div className="sidebar-foot">
-          <span className="muted">Ctrl+T 새 탭 · Ctrl+L 주소창</span>
+          <span className="muted">Ctrl+T 새 탭 · Ctrl+1~9 탭 이동 · Ctrl+Shift+T 닫은 탭 열기</span>
         </div>
       </nav>
       <main className="content">

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import type { AdblockStatus, AdblockTabStats, Bookmark, BrowserState, DetectedMedia, HistoryEntry, TabState } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/types'
 import { useApp } from '../state/AppContext'
+import { useDownloads } from '../hooks/useDownloads'
 import { Icon } from '../components/Icon'
 import { useConfirm } from '../components/Modal'
 import { Thumb } from '../components/Thumb'
@@ -20,6 +21,32 @@ export function BrowserPage(): React.JSX.Element {
   const { settings, saveSettings, requestAnalyze, play, toast, focusAddressToken, page, setPage } = useApp()
   const [adblock, setAdblock] = useState<AdblockStatus | null>(null)
   const [tabStats, setTabStats] = useState<AdblockTabStats | null>(null)
+  const [quickBusy, setQuickBusy] = useState<Set<string>>(new Set())
+  const tasks = useDownloads()
+  const taskByUrl = useMemo(() => {
+    const m = new Map<string, (typeof tasks)[number]>()
+    for (const t of tasks) {
+      const prev = m.get(t.url)
+      if (!prev || t.status === 'completed' || (prev.status !== 'completed' && t.createdAt > prev.createdAt)) m.set(t.url, t)
+    }
+    return m
+  }, [tasks])
+
+  const quickDownload = async (item: DetectedMedia): Promise<void> => {
+    setQuickBusy((s) => new Set(s).add(item.id))
+    try {
+      const t = await window.api.downloads.quick(item)
+      toast({ type: 'success', message: `바로 받기 시작: ${t.title}` })
+    } catch (e) {
+      toast({ type: 'error', message: errorText(e) })
+    } finally {
+      setQuickBusy((s) => {
+        const n = new Set(s)
+        n.delete(item.id)
+        return n
+      })
+    }
+  }
   const [state, setState] = useState<BrowserState>({ tabs: [], activeTabId: null })
   const [detected, setDetected] = useState<Record<number, DetectedMedia[]>>({})
   const [panel, setPanel] = useState<Panel>('none')
@@ -131,9 +158,15 @@ export function BrowserPage(): React.JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       if (page !== 'browser') return
       const mod = e.ctrlKey || e.metaKey
-      if (mod && e.key.toLowerCase() === 't') {
+      if (mod && e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault()
+        void window.api.browser.reopenClosedTab()
+      } else if (mod && e.key.toLowerCase() === 't') {
         e.preventDefault()
         void window.api.browser.newTab().then(() => addressRef.current?.focus())
+      } else if (mod && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
+        e.preventDefault()
+        void window.api.browser.activateIndex(Number(e.key))
       } else if (mod && e.key.toLowerCase() === 'w' && active) {
         e.preventDefault()
         void window.api.browser.closeTab(active.id)
@@ -205,6 +238,10 @@ export function BrowserPage(): React.JSX.Element {
             onClick={() => void window.api.browser.activateTab(t.id)}
             onAuxClick={(e) => {
               if (e.button === 1) void window.api.browser.closeTab(t.id)
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              void window.api.browser.tabMenu(t.id)
             }}
             title={t.url || '새 탭'}
           >
@@ -390,36 +427,56 @@ export function BrowserPage(): React.JSX.Element {
                     <span className="small">페이지에서 동영상을 재생하면 여기에 표시됩니다.</span>
                   </div>
                 ) : (
-                  [...activeDetected].reverse().map((m) => (
-                    <div key={m.id} className="media-item">
-                      <div className="head">
-                        <Thumb source={m.kind === 'dash' ? null : { kind: 'remote', url: m.url, headers: m.headers }} width={96} height={54} />
-                        <div>
-                          <div className="name">
-                            <span className={`kind ${m.kind}`}>{m.kind === 'file' ? (m.mime.split('/')[1] ?? 'file') : m.kind}</span>
-                            {m.filename || m.pageTitle || hostOf(m.url)}
-                          </div>
-                          <div className="meta">
-                            {m.size ? `${formatBytes(m.size)} · ` : ''}
-                            {hostOf(m.url)}
+                  [...activeDetected].reverse().map((m) => {
+                    const existing = taskByUrl.get(m.url)
+                    const done = existing?.status === 'completed'
+                    const inProgress = !!existing && !done && existing.status !== 'canceled' && existing.status !== 'error'
+                    const busy = quickBusy.has(m.id)
+                    return (
+                      <div key={m.id} className={`media-item ${done ? 'downloaded' : ''}`}>
+                        <div className="head">
+                          <Thumb source={m.kind === 'dash' ? null : { kind: 'remote', url: m.url, headers: m.headers }} width={96} height={54} />
+                          <div>
+                            <div className="name">
+                              <span className={`kind ${m.kind}`}>{m.kind === 'file' ? (m.mime.split('/')[1] ?? 'file') : m.kind}</span>
+                              {m.filename || m.pageTitle || hostOf(m.url)}
+                            </div>
+                            <div className="meta">
+                              {m.size ? `${formatBytes(m.size)} · ` : ''}
+                              {hostOf(m.url)}
+                            </div>
+                            {done && (
+                              <div className="dl-badge done" title={existing?.filePath}>
+                                <Icon name="checkCircle" size={13} /> 다운로드됨
+                              </div>
+                            )}
+                            {inProgress && (
+                              <div className="dl-badge progress">
+                                <Icon name="download" size={13} /> {existing?.status === 'paused' ? '일시정지됨' : '다운로드 중'}
+                                {existing?.progress.percent != null ? ` ${existing.progress.percent.toFixed(0)}%` : ''}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      </div>
-                      <div className="actions">
-                        <button className="btn sm primary" onClick={() => requestAnalyze({ url: m.url, headers: m.headers, pageUrl: m.pageUrl, pageTitle: m.pageTitle, item: m })}>
-                          <Icon name="download" size={13} /> 다운로드
-                        </button>
-                        {m.kind !== 'dash' && (
-                          <button className="btn sm" onClick={() => void playDetected(m)}>
-                            <Icon name="play" size={13} /> 재생
+                        <div className="actions">
+                          <button className="btn sm primary" onClick={() => requestAnalyze({ url: m.url, headers: m.headers, pageUrl: m.pageUrl, pageTitle: m.pageTitle, item: m })}>
+                            <Icon name="download" size={13} /> {done ? '다시 받기' : '다운로드'}
                           </button>
-                        )}
-                        <button className="btn sm ghost" onClick={() => void navigator.clipboard.writeText(m.url).then(() => toast({ type: 'info', message: '주소를 복사했습니다' }))} title="주소 복사">
-                          <Icon name="copy" size={13} />
-                        </button>
+                          <button className="btn sm quick" disabled={busy || inProgress} onClick={() => void quickDownload(m)} title="분석 창 없이 기본 화질 설정으로 바로 다운로드">
+                            <Icon name="bolt" size={13} /> {busy ? '준비 중' : '바로 받기'}
+                          </button>
+                          {m.kind !== 'dash' && (
+                            <button className="btn sm" onClick={() => void playDetected(m)}>
+                              <Icon name="play" size={13} /> 재생
+                            </button>
+                          )}
+                          <button className="btn sm ghost" onClick={() => void navigator.clipboard.writeText(m.url).then(() => toast({ type: 'info', message: '주소를 복사했습니다' }))} title="주소 복사">
+                            <Icon name="copy" size={13} />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    )
+                  })
                 ))}
               {panel === 'bookmarks' &&
                 (bookmarks.length === 0 ? (

@@ -489,6 +489,34 @@ a {
   display: flex;
   gap: 6px;
   margin-top: 8px;
+  flex-wrap: wrap;
+}
+.media-item.downloaded {
+  border-color: rgba(48, 164, 108, 0.5);
+}
+.dl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+.dl-badge.done {
+  background: #214431;
+  color: #8fe0b4;
+}
+.dl-badge.progress {
+  background: #22395f;
+  color: #9cc0ff;
+}
+.btn.quick {
+  border-color: #3d5a3f;
+  color: #a6e3b5;
+}
+.btn.quick:hover:not(:disabled) {
+  background: #24402a;
 }
 
 .kind {

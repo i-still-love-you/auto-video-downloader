@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AnalyzeResult, HlsVariant, YtdlpFormat } from '@shared/types'
 import { useApp } from '../state/AppContext'
+import { useDownloads } from '../hooks/useDownloads'
 import { Modal } from './Modal'
 import { Icon } from './Icon'
 import { Thumb } from './Thumb'
@@ -42,6 +43,11 @@ export function AnalyzeDialog(): React.JSX.Element | null {
   const [selection, setSelection] = useState('')
   const [filename, setFilename] = useState('')
   const [starting, setStarting] = useState(false)
+  const tasks = useDownloads()
+  const existing = useMemo(() => {
+    if (!result) return undefined
+    return tasks.find((t) => t.url === result.url && t.status === 'completed') ?? tasks.find((t) => t.url === result.url && (t.status === 'running' || t.status === 'queued' || t.status === 'paused'))
+  }, [tasks, result])
 
   useEffect(() => {
     if (!req) return
@@ -165,6 +171,12 @@ export function AnalyzeDialog(): React.JSX.Element | null {
       )}
       {result && (
         <div className="mt-8">
+          {existing && (
+            <div className={`dl-badge ${existing.status === 'completed' ? 'done' : 'progress'}`} style={{ marginBottom: 10 }}>
+              <Icon name={existing.status === 'completed' ? 'checkCircle' : 'download'} size={13} />
+              {existing.status === 'completed' ? `이미 다운로드한 항목입니다: ${existing.filePath ?? existing.title}` : '이미 다운로드 목록에 있는 항목입니다'}
+            </div>
+          )}
           <div className="analyze-head">
             <Thumb
               source={result.thumbnail ? { kind: 'url', url: result.thumbnail } : result.kind !== 'ytdlp' ? { kind: 'remote', url: result.url, headers: result.headers } : null}

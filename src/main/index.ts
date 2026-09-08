@@ -113,6 +113,7 @@ async function createWindow(): Promise<void> {
   })
 
   tabs = new TabManager(win, browserSession, sniffer, adblock)
+  await tabs.restoreSession()
   downloads!.setBrowserSession(browserSession)
 
   browserSession.on('will-download', (event, item, wc) => {
@@ -165,6 +166,7 @@ app.on('before-quit', (event) => {
   event.preventDefault()
   void (async () => {
     try {
+      tabs?.saveSessionSync()
       adblock?.destroy()
       await downloads?.shutdown()
       await vault?.lock()

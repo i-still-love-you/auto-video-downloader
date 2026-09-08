@@ -86,6 +86,18 @@ export function runSmoke(win: BrowserWindow, tabs: TabManager, sniffer: Sniffer,
   })
   let smokeTabId: number | null = null
   if (url) setTimeout(() => (smokeTabId = tabs.newTab(url, true)), 1500)
+  // VDL_SMOKE_URL2: 3초 뒤 두 번째 탭, VDL_SMOKE_JS: 6초 뒤 렌더러에서 실행할 JS (window.api 사용 가능)
+  const url2 = process.env.VDL_SMOKE_URL2
+  if (url2) setTimeout(() => tabs.newTab(url2, true), 3000)
+  const js = process.env.VDL_SMOKE_JS
+  if (js) {
+    setTimeout(() => {
+      void win.webContents
+        .executeJavaScript(js)
+        .then((r) => consoleLines.push(`[smoke] js: ${JSON.stringify(r) ?? 'undefined'}`))
+        .catch((e) => consoleLines.push(`[smoke] js failed: ${e}`))
+    }, 6000)
+  }
   const page = process.env.VDL_SMOKE_PAGE
   if (page) {
     if (process.env.VDL_SMOKE_HOOK) {

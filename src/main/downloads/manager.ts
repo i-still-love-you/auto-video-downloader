@@ -242,6 +242,12 @@ export class DownloadManager extends EventEmitter {
     return task
   }
 
+  /** 감지 항목을 분석 창 없이 기본 화질 설정으로 바로 큐에 넣는다. */
+  async quickDownload(item: DetectedMedia): Promise<DownloadTask> {
+    const analyze = await this.analyzeDetected(item)
+    return this.enqueue({ analyze })
+  }
+
   /** 브라우저 will-download / 우클릭 등에서 바로 추가 */
   enqueueDirect(opts: { url: string; title?: string; filename?: string; headers?: Record<string, string>; size?: number | null; mime?: string; pageUrl?: string }): DownloadTask {
     const s = getSettings()
