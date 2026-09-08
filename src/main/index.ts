@@ -64,7 +64,7 @@ async function createWindow(): Promise<void> {
     minHeight: 620,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#111318',
+    backgroundColor: '#0a0a0a',
     title: 'Video Downloader',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),

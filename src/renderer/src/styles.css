@@ -1,16 +1,31 @@
 :root {
-  --bg: #111318;
-  --bg2: #171a21;
-  --panel: #1d2029;
-  --panel2: #232733;
-  --border: #2b3040;
-  --text: #e6e8ee;
-  --muted: #8b91a3;
-  --accent: #4f8cff;
-  --accent2: #3b6fd6;
-  --danger: #e5484d;
-  --success: #30a46c;
-  --warn: #f5a524;
+  /* 무채색 블랙 테마: 바탕·패널·테두리는 순수 회색 단계, 강조색은 흰색에 가까운 밝은 회색 */
+  --bg: #0a0a0a;
+  --bg2: #111111;
+  --panel: #171717;
+  --panel2: #222222;
+  --border: #2a2a2a;
+  --text: #ececec;
+  --muted: #8c8c8c;
+  --accent: #f0f0f0;
+  --accent2: #d4d4d4;
+  /* 강조색 위에 놓이는 글자색 */
+  --accent-fg: #111111;
+  /* 의미 색(오류·완료·경고)만 채도를 낮춰 남긴다 */
+  --danger: #c95b5b;
+  --success: #6aa583;
+  --warn: #c9a961;
+  /* 상태 알약(pill) 색: 중립 / 강조 / 완료 / 실패 / 경고 */
+  --pill-bg: #262626;
+  --pill-fg: #bdbdbd;
+  --pill-hi-bg: #343434;
+  --pill-hi-fg: #e6e6e6;
+  --ok-bg: #1f2a23;
+  --ok-fg: #9fd3b0;
+  --bad-bg: #33221f;
+  --bad-fg: #eba6a6;
+  --warn-bg: #2f2a1c;
+  --warn-fg: #dcc389;
   --radius: 8px;
   --sidebar: 200px;
   font-family: 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif;
@@ -135,7 +150,7 @@ a {
   margin-left: auto;
   font-style: normal;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   border-radius: 10px;
   padding: 1px 7px;
   font-size: 11px;
@@ -243,7 +258,7 @@ a {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
 }
 .btn.primary:hover {
   background: var(--accent2);
@@ -298,8 +313,8 @@ a {
   height: 15px;
   padding: 0 4px;
   border-radius: 8px;
-  background: var(--danger);
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-fg);
   font-size: 10px;
   line-height: 15px;
   text-align: center;
@@ -379,7 +394,7 @@ a {
 }
 .tab .count {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   border-radius: 8px;
   font-size: 10px;
   padding: 0 5px;
@@ -430,7 +445,7 @@ a {
   flex: 1;
   min-width: 0;
   position: relative;
-  background: #fff;
+  background: var(--bg2);
 }
 .browser-content.blank {
   background: var(--bg);
@@ -518,7 +533,7 @@ a {
   flex-wrap: wrap;
 }
 .media-item.downloaded {
-  border-color: rgba(48, 164, 108, 0.5);
+  border-color: rgba(159, 211, 176, 0.35);
 }
 .dl-badge {
   display: inline-flex;
@@ -530,19 +545,19 @@ a {
   font-size: 11px;
 }
 .dl-badge.done {
-  background: #214431;
-  color: #8fe0b4;
+  background: var(--ok-bg);
+  color: var(--ok-fg);
 }
 .dl-badge.progress {
-  background: #22395f;
-  color: #9cc0ff;
+  background: var(--pill-hi-bg);
+  color: var(--pill-hi-fg);
 }
 .btn.quick {
-  border-color: #3d5a3f;
-  color: #a6e3b5;
+  border-color: #4a4a4a;
+  color: #dcdcdc;
 }
 .btn.quick:hover:not(:disabled) {
-  background: #24402a;
+  background: #2a2a2a;
 }
 
 .kind {
@@ -558,25 +573,13 @@ a {
   vertical-align: middle;
   margin-right: 6px;
 }
-.kind.hls {
-  background: #2a3f6b;
-  color: #9cc0ff;
-}
-.kind.file {
-  background: #274a3a;
-  color: #8fe0b4;
-}
-.kind.dash {
-  background: #4b3a68;
-  color: #cbb0ff;
-}
-.kind.ytdlp {
-  background: #5a3b2a;
-  color: #ffc39c;
-}
+.kind.hls,
+.kind.file,
+.kind.dash,
+.kind.ytdlp,
 .kind.page {
-  background: #4a3d1f;
-  color: #f2d58a;
+  background: #2e2e2e;
+  color: #d0d0d0;
 }
 .scan-tag {
   display: inline-block;
@@ -589,8 +592,8 @@ a {
   line-height: 15px;
 }
 .scan-tag.bad {
-  background: #5a2a2c;
-  color: #ffb3b5;
+  background: var(--bad-bg);
+  color: var(--bad-fg);
 }
 
 .list-item {
@@ -696,7 +699,8 @@ a {
 
 /* ---------- 광고 차단 ---------- */
 .icon-btn .dot.ok {
-  background: var(--success);
+  background: #4a4a4a;
+  color: #fff;
 }
 .adblock-panel {
   display: flex;
@@ -941,21 +945,21 @@ textarea.input {
   color: var(--muted);
 }
 .status.running {
-  background: #22395f;
-  color: #9cc0ff;
+  background: var(--pill-hi-bg);
+  color: var(--pill-hi-fg);
 }
 .status.completed {
-  background: #214431;
-  color: #8fe0b4;
+  background: var(--ok-bg);
+  color: var(--ok-fg);
 }
 .status.error {
-  background: #5a2a2c;
-  color: #ffb3b5;
+  background: var(--bad-bg);
+  color: var(--bad-fg);
 }
 .status.paused,
 .status.queued {
-  background: #4a3a1c;
-  color: #ffd68a;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
 }
 
 .empty {
@@ -1040,7 +1044,7 @@ textarea.input {
   margin-bottom: 10px;
 }
 .batch-job.running {
-  border-color: rgba(79, 140, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 .batch-job .head {
   display: flex;
@@ -1069,14 +1073,17 @@ textarea.input {
   margin-top: 6px;
 }
 .batch-job .stats .ok {
-  color: #8fe0b4;
+  color: var(--ok-fg);
 }
 .batch-job .stats .busy {
-  color: #9cc0ff;
+  color: var(--pill-hi-fg);
+}
+.batch-job .stats .warn {
+  color: var(--warn-fg);
 }
 .batch-job .stats .bad,
 .batch-item .bad {
-  color: #ffb3b5;
+  color: var(--bad-fg);
 }
 .batch-job .error {
   color: var(--warn);
@@ -1131,17 +1138,17 @@ textarea.input {
 }
 .status.downloading,
 .status.resolving {
-  background: #22395f;
-  color: #9cc0ff;
+  background: var(--pill-hi-bg);
+  color: var(--pill-hi-fg);
 }
 .status.found,
 .status.stopped {
-  background: var(--panel2);
+  background: var(--pill-bg);
   color: var(--muted);
 }
 .status.skipped {
-  background: #2c2f3a;
-  color: #a0a5b5;
+  background: var(--pill-bg);
+  color: var(--pill-fg);
 }
 
 .seg {
@@ -1418,12 +1425,12 @@ textarea.input {
   border-radius: 10px;
 }
 .pill.ok {
-  background: #214431;
-  color: #8fe0b4;
+  background: var(--ok-bg);
+  color: var(--ok-fg);
 }
 .pill.no {
-  background: #5a2a2c;
-  color: #ffb3b5;
+  background: var(--bad-bg);
+  color: var(--bad-fg);
 }
 
 /* ---------- 토스트 ---------- */
@@ -1505,7 +1512,7 @@ textarea.input {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2f3545;
+  background: #3a3a3a;
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: content-box;
