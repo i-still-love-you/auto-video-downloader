@@ -90,11 +90,14 @@ export function pageKeyOf(url: string): string {
   }
 }
 
+/**
+ * 제목 비교용 정규화: 대소문자, 확장자, 띄어쓰기·구두점·괄호류를 무시한다.
+ * 파일 이름 중복 표시 "(1)" 은 지우지 않고 남겨서 "제목" 과 "제목 (1)" 을 다른 제목으로 본다.
+ */
 export function normalizeTitle(title: string): string {
   return title
     .toLowerCase()
     .replace(/\.(mp4|mkv|webm|m4v|mov|ts|avi|flv)$/i, '')
-    .replace(/\s*\(\d+\)$/, '')
     .replace(/[\s\-_–—·•.,:;!?'"`´()[\]{}【】「」『』〈〉《》#*/\\|+~]+/g, ' ')
     .trim()
 }
