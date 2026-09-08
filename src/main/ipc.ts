@@ -5,6 +5,7 @@ import { IPC } from '@shared/ipc'
 import {
   MEDIA_EXTENSIONS,
   type AppNotification,
+  type BatchOptions,
   type DetectedMedia,
   type EnqueueRequest,
   type FileEntry,
@@ -17,6 +18,7 @@ import {
 import type { TabManager } from './browser/tabs'
 import type { Sniffer } from './browser/sniffer'
 import type { DownloadManager } from './downloads/manager'
+import type { BatchManager } from './batch/manager'
 import type { Vault } from './vault/vault'
 import type { AdBlocker } from './browser/adblock'
 import { getSettings, updateSettings } from './settings'
@@ -32,6 +34,7 @@ export interface IpcDeps {
   tabs: TabManager
   sniffer: Sniffer
   downloads: DownloadManager
+  batch: BatchManager
   vault: Vault
   adblock: AdBlocker
 }
@@ -99,6 +102,10 @@ export function registerIpc(d: IpcDeps): void {
     d.win.webContents.focus()
     navigate({ page: 'downloads', analyzeUrl: url, pageUrl })
   })
+  d.tabs.on('batchUrl', (url: string) => {
+    d.win.webContents.focus()
+    navigate({ page: 'batch', batchUrl: url })
+  })
 
   // ---------- 기록 / 즐겨찾기 ----------
   handle(IPC.history.list, (_e, query?: string, limit?: number) => db.listHistory(query, limit))
@@ -129,6 +136,21 @@ export function registerIpc(d: IpcDeps): void {
   d.downloads.on('update', (t) => send(IPC.downloads.evUpdate, t))
   d.downloads.on('removed', (id) => send(IPC.downloads.evRemoved, id))
   d.downloads.on('notify', (n) => notify(n))
+
+  // ---------- 자동(일괄) 다운로드 ----------
+  handle(IPC.batch.list, () => d.batch.list())
+  handle(IPC.batch.preview, (_e, url: string, tabId?: number, filter?: string) => d.batch.preview(String(url ?? ''), typeof tabId === 'number' ? tabId : undefined, typeof filter === 'string' ? filter : undefined))
+  handle(IPC.batch.create, (_e, url: string, options?: Partial<BatchOptions>) => d.batch.create(String(url ?? ''), options))
+  handle(IPC.batch.resume, (_e, id: string) => d.batch.resume(id))
+  handle(IPC.batch.pause, (_e, id: string) => d.batch.pause(id))
+  handle(IPC.batch.stop, (_e, id: string) => d.batch.stop(id))
+  handle(IPC.batch.remove, (_e, id: string, cancelTasks?: boolean) => d.batch.remove(id, !!cancelTasks))
+  handle(IPC.batch.retryFailed, (_e, id: string) => d.batch.retryFailed(id))
+  handle(IPC.batch.retryItem, (_e, id: string, itemId: string) => d.batch.retryItem(id, itemId))
+  handle(IPC.batch.skipItem, (_e, id: string, itemId: string) => d.batch.skipItem(id, itemId))
+  d.batch.on('update', (j) => send(IPC.batch.evUpdate, j))
+  d.batch.on('removed', (id) => send(IPC.batch.evRemoved, id))
+  d.batch.on('notify', (n) => notify(n))
 
   // ---------- 파일 ----------
   handle(IPC.files.list, async (): Promise<FileEntry[]> => {

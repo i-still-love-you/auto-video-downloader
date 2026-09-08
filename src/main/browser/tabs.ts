@@ -79,7 +79,7 @@ export function resolveInput(input: string, engineId: string): string {
 
 /**
  * WebContentsView 기반 탭 관리자. 열린 탭과 각 탭의 탐색 기록을 세션 파일에 저장해 다음 실행 때 복구한다.
- * 이벤트: 'state' (BrowserState), 'focusAddress', 'bookmark', 'downloadUrl' (url, pageUrl)
+ * 이벤트: 'state' (BrowserState), 'focusAddress', 'bookmark', 'downloadUrl' (url, pageUrl), 'batchUrl' (url, tabId)
  */
 export class TabManager extends EventEmitter {
   private tabs = new Map<number, Tab>()
@@ -147,6 +147,18 @@ export class TabManager extends EventEmitter {
       this.prepareSession(s)
     }
     return s
+  }
+
+  /** 탭이 아닌 보조 기능(자동 다운로드 크롤러 등)이 쓰는 메모리 전용 세션. 탭과 같은 UA·차단기·preload 가 붙는다. */
+  serviceSession(name: string): Session {
+    return this.sessionFor(`service-${name}`)
+  }
+
+  /** 탭 id 로 그 탭의 세션을 찾는다 (탭이 없으면 undefined) */
+  sessionOfTab(id: number): Session | undefined {
+    const t = this.tabs.get(id)
+    if (!t || t.view.webContents.isDestroyed()) return undefined
+    return t.view.webContents.session
   }
 
   /** 파티션을 쓰는 탭이 더 없으면 저장소와 캐시를 즉시 비운다. */
@@ -602,6 +614,7 @@ export class TabManager extends EventEmitter {
       { label: '새로고침', click: () => wc.reload() },
       { type: 'separator' },
       { label: '현재 페이지 주소로 다운로드 시도', click: () => this.emit('downloadUrl', wc.getURL(), wc.getURL()) },
+      { label: '이 페이지의 영상 목록 자동 다운로드...', click: () => this.emit('batchUrl', wc.getURL(), tab.id) },
       { label: '검사', click: () => wc.inspectElement(params.x, params.y) }
     )
     Menu.buildFromTemplate(items).popup({ window: this.win })

@@ -377,7 +377,8 @@ export class AdBlocker extends EventEmitter {
   // ---------- 설정 ----------
 
   private emitStatus(): void {
-    this.emit('status', this.status())
+    // status() 는 비동기이므로 Promise 가 아니라 결과를 보내야 IPC 직렬화가 된다
+    void this.status().then((s) => this.emit('status', s)).catch(() => undefined)
   }
 
   async status(): Promise<AdblockStatus> {

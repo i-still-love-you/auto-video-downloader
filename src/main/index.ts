@@ -7,6 +7,7 @@ import { Sniffer } from './browser/sniffer'
 import { TabManager } from './browser/tabs'
 import { AdBlocker } from './browser/adblock'
 import { DownloadManager } from './downloads/manager'
+import { BatchManager } from './batch/manager'
 import { cookieHeaderFor } from './downloads/net'
 import { Vault } from './vault/vault'
 import { registerIpc } from './ipc'
@@ -33,6 +34,7 @@ const CSP = [
 let win: BrowserWindow | null = null
 let tabs: TabManager | null = null
 let downloads: DownloadManager | null = null
+let batch: BatchManager | null = null
 let vault: Vault | null = null
 let adblock: AdBlocker | null = null
 let quitting = false
@@ -78,6 +80,8 @@ async function createWindow(): Promise<void> {
     return { action: 'deny' }
   })
   win.on('closed', () => {
+    // 크롤러 숨김 창이 남아 있으면 window-all-closed 가 오지 않으므로 먼저 정리한다
+    batch?.pauseAll()
     tabs?.destroy()
     tabs = null
     win = null
@@ -155,7 +159,21 @@ async function createWindow(): Promise<void> {
     return wc && !wc.isDestroyed() ? wc.session : null
   }, userAgent)
 
-  registerIpc({ win, tabs, sniffer, downloads: downloads!, vault: vault!, adblock })
+  if (!batch) {
+    const firstTabs = tabs
+    batch = new BatchManager({
+      downloads: downloads!,
+      // 탭 세션(쿠키·로그인)을 빌리고, 없으면 크롤러 전용 메모리 세션을 쓴다
+      sessionFor: (tabId) => {
+        const tm = tabs ?? firstTabs
+        return (tabId !== undefined ? tm.sessionOfTab(tabId) : undefined) ?? tm.serviceSession('batch-crawler')
+      },
+      userAgent
+    })
+    await batch.init()
+  }
+
+  registerIpc({ win, tabs, sniffer, downloads: downloads!, batch, vault: vault!, adblock })
   setupUpdater(win, getSettings().autoUpdate)
 
   if (process.env.ELECTRON_RENDERER_URL) await win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -192,6 +210,7 @@ app.on('before-quit', (event) => {
     try {
       tabs?.saveSessionSync()
       adblock?.destroy()
+      await batch?.shutdown()
       await downloads?.shutdown()
       await vault?.lock()
       await flushSettings()

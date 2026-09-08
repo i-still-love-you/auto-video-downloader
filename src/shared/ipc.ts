@@ -57,6 +57,20 @@ export const IPC = {
     evUpdate: 'downloads:ev:update',
     evRemoved: 'downloads:ev:removed'
   },
+  batch: {
+    list: 'batch:list',
+    preview: 'batch:preview',
+    create: 'batch:create',
+    resume: 'batch:resume',
+    pause: 'batch:pause',
+    stop: 'batch:stop',
+    remove: 'batch:remove',
+    retryFailed: 'batch:retryFailed',
+    retryItem: 'batch:retryItem',
+    skipItem: 'batch:skipItem',
+    evUpdate: 'batch:ev:update',
+    evRemoved: 'batch:ev:removed'
+  },
   files: {
     list: 'files:list',
     open: 'files:open',

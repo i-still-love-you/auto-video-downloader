@@ -161,6 +161,8 @@ export interface DownloadTask {
   thumbnail?: string
   size?: number | null
   mime?: string
+  /** 자동(일괄) 다운로드 작업에서 추가된 항목이면 그 작업 id */
+  batchId?: string
 }
 
 export interface AnalyzeResult {
@@ -183,6 +185,9 @@ export interface EnqueueRequest {
   analyze: AnalyzeResult
   selection?: string
   filename?: string
+  /** 설정의 기본 화질 대신 쓸 화질 (자동 다운로드 작업별 화질) */
+  quality?: PreferredQuality
+  batchId?: string
 }
 
 export interface FileEntry {
@@ -324,13 +329,102 @@ export interface PopupStats {
   items: BlockedPopup[]
 }
 
-export type PageId = 'browser' | 'downloads' | 'files' | 'player' | 'vault' | 'settings'
+export type PageId = 'browser' | 'downloads' | 'batch' | 'files' | 'player' | 'vault' | 'settings'
 
 export interface NavigateEvent {
   page: PageId
   focusAddress?: boolean
   analyzeUrl?: string
   pageUrl?: string
+  /** 자동 다운로드 페이지에 미리 채울 목록 페이지 주소 */
+  batchUrl?: string
+}
+
+// ---------- 자동(일괄) 다운로드 ----------
+
+export type BatchStatus = 'running' | 'paused' | 'completed' | 'stopped' | 'error'
+
+/**
+ * found = 목록에서 발견, resolving = 영상 페이지에서 실제 주소 확인 중, queued = 다운로드 큐에 추가됨,
+ * downloading = 받는 중, completed = 완료, error = 실패, skipped = 건너뜀(이미 받았거나 사용자가 제외)
+ */
+export type BatchItemStatus = 'found' | 'resolving' | 'queued' | 'downloading' | 'completed' | 'error' | 'skipped'
+
+export interface BatchItem {
+  id: string
+  /** 영상 페이지 주소 */
+  url: string
+  title: string
+  thumb?: string
+  /** 목록 페이지에 표시된 길이 문자열 (예: 12:34) */
+  duration?: string
+  /** 몇 번째로 읽은 목록 페이지에서 발견했는지 */
+  page: number
+  status: BatchItemStatus
+  taskId?: string
+  mediaUrl?: string
+  error?: string
+  /** 실제 주소를 찾은 방법: kvs(플레이어 설정), generic(페이지 태그/스크립트), ytdlp */
+  extractor?: string
+  addedAt: number
+}
+
+export interface BatchOptions {
+  /** 이 번호의 목록 페이지부터 시작 (1 이상) */
+  startPage: number
+  /** 읽을 최대 목록 페이지 수 (0 = 끝까지) */
+  maxPages: number
+  /** 추가할 최대 영상 수 (0 = 제한 없음) */
+  maxItems: number
+  /** settings = 설정의 기본 화질 사용 ('매번 선택'이면 최고 화질) */
+  quality: PreferredQuality | 'settings'
+  /** 이미 완료된 다운로드가 있는 영상 페이지는 건너뛰기 */
+  skipDownloaded: boolean
+  /** 목록 페이지를 연달아 읽을 때 사이의 대기 시간 */
+  pageDelayMs: number
+  /** 제목/주소 필터 (문자열 또는 정규식, 비우면 전체) */
+  filter: string
+  /** 쿠키·로그인 상태를 빌릴 브라우저 탭 (없으면 전용 세션) */
+  tabId?: number
+}
+
+export interface BatchPages {
+  scanned: number
+  nextUrl: string | null
+  lastUrl?: string
+  done: boolean
+  visited: string[]
+}
+
+export interface BatchJob {
+  id: string
+  sourceUrl: string
+  title: string
+  host: string
+  options: BatchOptions
+  status: BatchStatus
+  error?: string
+  createdAt: number
+  updatedAt: number
+  pages: BatchPages
+  items: BatchItem[]
+}
+
+export interface BatchPreviewItem {
+  url: string
+  title: string
+  thumb?: string
+  duration?: string
+}
+
+export interface BatchPreview {
+  url: string
+  title: string
+  items: BatchPreviewItem[]
+  /** 필터 적용 전 영상 링크 수 */
+  total: number
+  next: string | null
+  challenge: boolean
 }
 
 export interface UpdateInfo {

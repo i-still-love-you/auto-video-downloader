@@ -19,7 +19,8 @@ import type {
   DetectedMedia,
   DownloadProgress,
   DownloadTask,
-  EnqueueRequest
+  EnqueueRequest,
+  PreferredQuality
 } from '@shared/types'
 
 interface StoreData {
@@ -219,9 +220,15 @@ export class DownloadManager extends EventEmitter {
 
   // ---------- 큐 ----------
 
+  /** 같은 영상 페이지(또는 같은 주소)를 이미 받은 완료 작업 */
+  findCompletedFor(url: string): DownloadTask | undefined {
+    return this.list().find((t) => t.status === 'completed' && (t.pageUrl === url || t.url === url))
+  }
+
   enqueue(req: EnqueueRequest): DownloadTask {
     const s = getSettings()
     const a = req.analyze
+    const pref: PreferredQuality = req.quality && req.quality !== 'ask' ? req.quality : s.preferredQuality
     const filename = req.filename?.trim() ? stripMediaExt(sanitizeFilename(req.filename)) : undefined
     const task: DownloadTask = {
       id: newId(),
@@ -238,13 +245,14 @@ export class DownloadManager extends EventEmitter {
       createdAt: Date.now(),
       thumbnail: a.thumbnail,
       size: a.size ?? null,
-      mime: a.mime
+      mime: a.mime,
+      batchId: req.batchId
     }
     if (a.kind === 'hls' && a.variants?.length) {
       const idx = req.selection !== undefined && req.selection !== '' ? Number(req.selection) : NaN
-      task.variant = Number.isInteger(idx) && a.variants[idx] ? a.variants[idx] : pickVariant(a.variants, s.preferredQuality)
+      task.variant = Number.isInteger(idx) && a.variants[idx] ? a.variants[idx] : pickVariant(a.variants, pref)
     }
-    if (a.kind === 'ytdlp') task.formatId = buildSelector(req.selection, a.formats, s.preferredQuality)
+    if (a.kind === 'ytdlp') task.formatId = buildSelector(req.selection, a.formats, pref)
     this.add(task)
     return task
   }

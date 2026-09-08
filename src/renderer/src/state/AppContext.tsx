@@ -41,6 +41,10 @@ interface AppContextValue {
   play: (item: PlayerItem, queue?: PlayerItem[]) => void
   setPlayerIndex: (i: number) => void
   focusAddressToken: number
+  /** 자동 다운로드 페이지에 미리 채울 목록 주소 */
+  batchPrefill: string | null
+  openBatch: (url: string) => void
+  clearBatchPrefill: () => void
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -54,7 +58,14 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
   const [playerQueue, setPlayerQueue] = useState<PlayerItem[]>([])
   const [playerIndex, setPlayerIndex] = useState(0)
   const [focusAddressToken, setFocusAddressToken] = useState(0)
+  const [batchPrefill, setBatchPrefill] = useState<string | null>(null)
   const toastId = useRef(0)
+
+  const openBatch = useCallback((url: string) => {
+    setBatchPrefill(url)
+    setPage('batch')
+  }, [])
+  const clearBatchPrefill = useCallback(() => setBatchPrefill(null), [])
 
   const toast = useCallback((n: AppNotification) => {
     const id = ++toastId.current
@@ -95,6 +106,7 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
       setPage(ev.page)
       if (ev.focusAddress) setFocusAddressToken((t) => t + 1)
       if (ev.analyzeUrl) setAnalyzeRequest({ url: ev.analyzeUrl, pageUrl: ev.pageUrl })
+      if (ev.batchUrl) setBatchPrefill(ev.batchUrl)
     })
     return () => {
       offNotify()
@@ -122,7 +134,10 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
       playerIndex,
       play,
       setPlayerIndex,
-      focusAddressToken
+      focusAddressToken,
+      batchPrefill,
+      openBatch,
+      clearBatchPrefill
     }),
     [
       page,
@@ -141,7 +156,10 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
       playerQueue,
       playerIndex,
       play,
-      focusAddressToken
+      focusAddressToken,
+      batchPrefill,
+      openBatch,
+      clearBatchPrefill
     ]
   )
 

@@ -964,6 +964,186 @@ textarea.input {
   padding: 60px 20px;
 }
 
+/* ---------- 자동(일괄) 다운로드 ---------- */
+.batch-form {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.batch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px 14px;
+}
+.batch-grid .field {
+  margin-bottom: 0;
+}
+.batch-grid .field.wide {
+  grid-column: span 2;
+}
+.batch-preview {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+.preview-item {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  cursor: pointer;
+  position: relative;
+}
+.preview-item:hover {
+  border-color: var(--accent);
+}
+.preview-item .thumb {
+  border-radius: 4px;
+}
+.preview-item .t {
+  font-size: 11px;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-item .d {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.batch-job {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.batch-job.running {
+  border-color: rgba(79, 140, 255, 0.5);
+}
+.batch-job .head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.batch-job .title {
+  font-weight: 600;
+}
+.batch-job .sub {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.batch-job .actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.batch-job .stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.batch-job .stats .ok {
+  color: #8fe0b4;
+}
+.batch-job .stats .busy {
+  color: #9cc0ff;
+}
+.batch-job .stats .bad,
+.batch-item .bad {
+  color: #ffb3b5;
+}
+.batch-job .error {
+  color: var(--warn);
+  font-size: 12px;
+  margin-top: 6px;
+}
+.batch-items {
+  border-top: 1px solid var(--border);
+  margin-top: 10px;
+  padding-top: 4px;
+}
+.batch-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.batch-item:last-child {
+  border-bottom: 0;
+}
+.batch-item .body {
+  flex: 1;
+  min-width: 0;
+}
+.batch-item .t {
+  font-size: 12px;
+}
+.batch-item .m {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+  align-items: center;
+}
+.batch-item .m span[title] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+.batch-item .actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.batch-item.completed .t,
+.batch-item.skipped .t {
+  color: var(--muted);
+}
+.status.downloading,
+.status.resolving {
+  background: #22395f;
+  color: #9cc0ff;
+}
+.status.found,
+.status.stopped {
+  background: var(--panel2);
+  color: var(--muted);
+}
+.status.skipped {
+  background: #2c2f3a;
+  color: #a0a5b5;
+}
+
 .seg {
   display: inline-flex;
   border: 1px solid var(--border);

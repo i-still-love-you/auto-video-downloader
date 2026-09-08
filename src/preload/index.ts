@@ -5,6 +5,9 @@ import type {
   AdblockTabStats,
   AnalyzeResult,
   AppNotification,
+  BatchJob,
+  BatchOptions,
+  BatchPreview,
   Bookmark,
   BrowserState,
   DetectedMedia,
@@ -97,6 +100,20 @@ const api = {
     showInFolder: (id: string) => invoke<void>(IPC.downloads.showInFolder, id),
     onUpdate: (cb: (t: DownloadTask) => void) => on<DownloadTask>(IPC.downloads.evUpdate, cb),
     onRemoved: (cb: (id: string) => void) => on<string>(IPC.downloads.evRemoved, cb)
+  },
+  batch: {
+    list: () => invoke<BatchJob[]>(IPC.batch.list),
+    preview: (url: string, tabId?: number, filter?: string) => invoke<BatchPreview>(IPC.batch.preview, url, tabId, filter),
+    create: (url: string, options?: Partial<BatchOptions>) => invoke<BatchJob>(IPC.batch.create, url, options),
+    resume: (id: string) => invoke<void>(IPC.batch.resume, id),
+    pause: (id: string) => invoke<void>(IPC.batch.pause, id),
+    stop: (id: string) => invoke<void>(IPC.batch.stop, id),
+    remove: (id: string, cancelTasks?: boolean) => invoke<void>(IPC.batch.remove, id, cancelTasks),
+    retryFailed: (id: string) => invoke<void>(IPC.batch.retryFailed, id),
+    retryItem: (id: string, itemId: string) => invoke<void>(IPC.batch.retryItem, id, itemId),
+    skipItem: (id: string, itemId: string) => invoke<void>(IPC.batch.skipItem, id, itemId),
+    onUpdate: (cb: (j: BatchJob) => void) => on<BatchJob>(IPC.batch.evUpdate, cb),
+    onRemoved: (cb: (id: string) => void) => on<string>(IPC.batch.evRemoved, cb)
   },
   files: {
     list: () => invoke<FileEntry[]>(IPC.files.list),

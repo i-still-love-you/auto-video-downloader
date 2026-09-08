@@ -167,6 +167,11 @@ function TaskRow({
       <div className="body">
         <div className="title" title={t.filePath ?? t.url}>
           <span className={`kind ${t.engine === 'http' ? 'file' : t.engine}`}>{t.engine === 'http' ? 'FILE' : t.engine === 'hls' ? 'HLS' : 'YT-DLP'}</span>
+          {t.batchId && (
+            <span className="scan-tag" style={{ marginLeft: 0, marginRight: 6 }} title="자동 다운로드 작업에서 추가된 항목">
+              자동
+            </span>
+          )}
           {t.filePath ? fileNameOf(t.filePath) : t.title}
         </div>
         <div className="sub">{hostOf(t.url)}{t.pageUrl && t.pageUrl !== t.url ? ` · ${t.pageUrl}` : ''}</div>

@@ -52,7 +52,7 @@ function sortDetected(list: DetectedMedia[], mode: SortMode): DetectedMedia[] {
 }
 
 export function BrowserPage(): React.JSX.Element {
-  const { settings, saveSettings, requestAnalyze, play, toast, focusAddressToken, page, setPage } = useApp()
+  const { settings, saveSettings, requestAnalyze, play, toast, focusAddressToken, page, setPage, openBatch } = useApp()
   const [adblock, setAdblock] = useState<AdblockStatus | null>(null)
   const [tabStats, setTabStats] = useState<AdblockTabStats | null>(null)
   const [popupStats, setPopupStats] = useState<PopupStats | null>(null)
@@ -588,6 +588,11 @@ export function BrowserPage(): React.JSX.Element {
                   onClick={() => requestAnalyze({ url: active.url, pageUrl: active.url, pageTitle: active.title })}
                 >
                   <Icon name="search" size={16} />
+                </button>
+              )}
+              {active?.url && (
+                <button className="icon-btn" title="자동 다운로드: 이 목록 페이지의 영상을 페이지를 넘겨 가며 모두 받습니다" onClick={() => openBatch(active.url)}>
+                  <Icon name="layers" size={16} />
                 </button>
               )}
               {active && activeDetected.length > 0 && (
