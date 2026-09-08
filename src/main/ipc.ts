@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, shell, type BrowserWindow, type Session } from 'electron'
+import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { IPC } from '@shared/ipc'
@@ -33,7 +33,6 @@ export interface IpcDeps {
   sniffer: Sniffer
   downloads: DownloadManager
   vault: Vault
-  browserSession: Session
   adblock: AdBlocker
 }
 
@@ -76,6 +75,7 @@ export function registerIpc(d: IpcDeps): void {
 
   d.tabs.on('state', (s) => send(IPC.browser.evState, s))
   d.sniffer.on('detected', (item: DetectedMedia) => send(IPC.browser.evDetected, item))
+  d.sniffer.on('updated', (item: DetectedMedia) => send(IPC.browser.evDetectedUpdated, item))
 
   // ---------- 페이지 스캔 (탭 preload 에서 옴) ----------
   handle(IPC.scan.config, () => getSettings().pageScan)
@@ -111,7 +111,7 @@ export function registerIpc(d: IpcDeps): void {
   // ---------- 다운로드 ----------
   handle(IPC.downloads.list, () => d.downloads.list())
   handle(IPC.downloads.analyze, (_e, url: string, headers?: Record<string, string>, pageUrl?: string, pageTitle?: string) =>
-    d.downloads.analyze(url, headers, pageUrl, pageTitle)
+    d.downloads.analyze(url, headers, pageUrl, pageTitle, d.tabs.activeTabId ?? undefined)
   )
   handle(IPC.downloads.analyzeDetected, (_e, item: DetectedMedia) => d.downloads.analyzeDetected(item))
   handle(IPC.downloads.quick, (_e, item: DetectedMedia) => d.downloads.quickDownload(item))

@@ -26,7 +26,8 @@ export const IPC = {
     getDetected: 'browser:getDetected',
     clearDetected: 'browser:clearDetected',
     evState: 'browser:ev:state',
-    evDetected: 'browser:ev:detected'
+    evDetected: 'browser:ev:detected',
+    evDetectedUpdated: 'browser:ev:detectedUpdated'
   },
   history: {
     list: 'history:list',

@@ -154,6 +154,26 @@ export function SettingsPage({ active }: { active: boolean }): React.JSX.Element
         </section>
 
         <section className="settings-section">
+          <h3>개인정보</h3>
+          <label className="checkbox">
+            <input type="checkbox" checked={s.privacy.isolateTabs} onChange={(e) => void saveSettings({ privacy: { ...s.privacy, isolateTabs: e.target.checked } })} />
+            탭마다 별도 세션 사용 (쿠키·저장소·캐시를 탭 간에 공유하지 않음)
+          </label>
+          <label className="checkbox mt-8">
+            <input
+              type="checkbox"
+              checked={s.privacy.inheritOnOpen}
+              disabled={!s.privacy.isolateTabs}
+              onChange={(e) => void saveSettings({ privacy: { ...s.privacy, inheritOnOpen: e.target.checked } })}
+            />
+            페이지가 연 팝업, "새 탭에서 링크 열기", 탭 복제는 원래 탭의 세션을 물려받기 (로그인 팝업 등이 깨지지 않도록)
+          </label>
+          <span className="hint">
+            브라우저 세션은 항상 메모리에만 존재해 앱을 닫으면 쿠키와 로그인 상태가 모두 사라집니다. 탭을 닫으면 그 탭의 세션 데이터도 즉시 비웁니다. 설정 변경은 새로 여는 탭부터 적용됩니다.
+          </span>
+        </section>
+
+        <section className="settings-section">
           <h3>동영상 감지</h3>
           <label className="checkbox">
             <input type="checkbox" checked={s.pageScan.enabled} onChange={(e) => void saveSettings({ pageScan: { ...s.pageScan, enabled: e.target.checked } })} />

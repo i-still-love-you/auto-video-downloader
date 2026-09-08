@@ -75,10 +75,10 @@ export class AdBlocker extends EventEmitter {
   private ruleCount = 0
   private statsTimer: NodeJS.Timeout | null = null
   private checkTimer: NodeJS.Timeout | null = null
-  private preloadId: string | null = null
+  private preloadIds = new Map<Session, string>()
   private pendingRebuild = false
 
-  constructor(private readonly session: Session) {
+  constructor() {
     super()
   }
 
@@ -105,7 +105,6 @@ export class AdBlocker extends EventEmitter {
     ipcMain.handle('@ghostery/adblocker/is-mutation-observer-enabled', (event) =>
       this.blocker ? this.blocker.onIsMutationObserverEnabled(event) : Promise.resolve(false)
     )
-    this.registerPreload()
     this.applyDoh()
     await this.loadCache()
     if (!this.blocker || Date.now() - this.updatedAt > UPDATE_INTERVAL) void this.rebuild(true)
@@ -114,25 +113,32 @@ export class AdBlocker extends EventEmitter {
     }, CHECK_INTERVAL)
   }
 
-  private registerPreload(): void {
+  /** 탭 세션마다 호출: 코스메틱 필터 preload 를 등록한다. (webRequest 리스너는 세션 소유자가 합쳐서 등록) */
+  attachSession(session: Session): void {
+    if (this.preloadIds.has(session)) return
     try {
       const preloadPath = require.resolve('@ghostery/adblocker-electron-preload')
-      this.preloadId = this.session.registerPreloadScript({ type: 'frame', filePath: preloadPath })
+      this.preloadIds.set(session, session.registerPreloadScript({ type: 'frame', filePath: preloadPath }))
     } catch (e) {
       this.error = `코스메틱 필터 preload 등록 실패: ${errorMessage(e)}`
+    }
+  }
+
+  detachSession(session: Session): void {
+    const id = this.preloadIds.get(session)
+    if (id === undefined) return
+    this.preloadIds.delete(session)
+    try {
+      session.unregisterPreloadScript(id)
+    } catch {
+      /* ignore */
     }
   }
 
   destroy(): void {
     if (this.checkTimer) clearInterval(this.checkTimer)
     if (this.statsTimer) clearTimeout(this.statsTimer)
-    if (this.preloadId) {
-      try {
-        this.session.unregisterPreloadScript(this.preloadId)
-      } catch {
-        /* ignore */
-      }
-    }
+    for (const session of [...this.preloadIds.keys()]) this.detachSession(session)
     ipcMain.removeHandler('@ghostery/adblocker/inject-cosmetic-filters')
     ipcMain.removeHandler('@ghostery/adblocker/is-mutation-observer-enabled')
   }

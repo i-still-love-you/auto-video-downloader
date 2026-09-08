@@ -66,7 +66,8 @@ const api = {
     getDetected: (tabId?: number) => invoke<DetectedMedia[]>(IPC.browser.getDetected, tabId),
     clearDetected: (tabId: number) => invoke<void>(IPC.browser.clearDetected, tabId),
     onState: (cb: (s: BrowserState) => void) => on<BrowserState>(IPC.browser.evState, cb),
-    onDetected: (cb: (m: DetectedMedia) => void) => on<DetectedMedia>(IPC.browser.evDetected, cb)
+    onDetected: (cb: (m: DetectedMedia) => void) => on<DetectedMedia>(IPC.browser.evDetected, cb),
+    onDetectedUpdated: (cb: (m: DetectedMedia) => void) => on<DetectedMedia>(IPC.browser.evDetectedUpdated, cb)
   },
   history: {
     list: (query?: string, limit?: number) => invoke<HistoryEntry[]>(IPC.history.list, query, limit),

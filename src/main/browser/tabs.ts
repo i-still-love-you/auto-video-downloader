@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { promises as fs, writeFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
-import { app, BrowserWindow, Menu, WebContentsView, clipboard, type Session, type WebContents } from 'electron'
+import { app, BrowserWindow, Menu, WebContentsView, clipboard, session as electronSession, type Session, type WebContents } from 'electron'
 import type { BlockedPopup, BrowserState, PopupBlockReason, PopupStats, Rect, TabState } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/types'
 import { getSettings, updateSettings } from '../settings'
@@ -31,6 +31,8 @@ interface Tab {
   view: WebContentsView
   state: TabState
   blank: boolean
+  /** 이 탭이 쓰는 세션 파티션 (탭 격리 시 탭마다 다름, 메모리 전용) */
+  partition: string
   /** 세션 복구로 만들어졌지만 아직 로드하지 않은 탭 (활성화될 때 로드) */
   pending: SavedTab | null
   /** 팝업 차단용: 마지막 사용자 입력 시각, 그 입력으로 이미 연 팝업의 입력 시각, 마지막 메인 프레임 이동 시작 시각 */
@@ -49,6 +51,8 @@ const TAB_UNDER_PROBATION_MS = 500
 /** 새 창 요청 직전에 원래 탭이 이동을 시작했다면 같은 클릭에서 나온 것으로 본다 */
 const TAB_UNDER_LOOKBACK_MS = 400
 const MAX_BLOCKED_POPUPS = 10
+/** 탭 격리를 끈 경우 모든 탭이 공유하는 메모리 전용 파티션 (persist: 접두사가 없어 종료 시 사라짐) */
+const SHARED_PARTITION = 'browser-shared'
 
 function hostOf(url: string): string {
   try {
@@ -88,12 +92,15 @@ export class TabManager extends EventEmitter {
   private sessionTimer: NodeJS.Timeout | null = null
   private closedTabs: SavedTab[] = []
   private destroyed = false
+  private partitionCounter = 0
+  private preparedPartitions = new Set<string>()
 
   constructor(
     private readonly win: BrowserWindow,
-    private readonly session: Session,
     private readonly sniffer: Sniffer,
-    private readonly adblock?: AdBlocker
+    private readonly adblock: AdBlocker | undefined,
+    /** 새 세션이 만들어질 때 감지기·차단기·preload 를 붙이는 콜백 */
+    private readonly prepareSession: (s: Session) => void
   ) {
     super()
     sniffer.on('changed', () => this.emitState())
@@ -120,12 +127,46 @@ export class TabManager extends EventEmitter {
     }
   }
 
+  // ---------- 세션(파티션) ----------
+
+  /** 새 탭의 파티션을 정한다. 격리 모드면 탭마다 새 메모리 파티션, 물려받기 대상이 있으면 그 탭의 파티션. */
+  private partitionFor(inheritFrom?: number): string {
+    const p = getSettings().privacy
+    if (!p.isolateTabs) return SHARED_PARTITION
+    if (p.inheritOnOpen && inheritFrom !== undefined) {
+      const src = this.tabs.get(inheritFrom)
+      if (src) return src.partition
+    }
+    return `tab-${Date.now().toString(36)}-${++this.partitionCounter}`
+  }
+
+  private sessionFor(partition: string): Session {
+    const s = electronSession.fromPartition(partition)
+    if (!this.preparedPartitions.has(partition)) {
+      this.preparedPartitions.add(partition)
+      this.prepareSession(s)
+    }
+    return s
+  }
+
+  /** 파티션을 쓰는 탭이 더 없으면 저장소와 캐시를 즉시 비운다. */
+  private releasePartition(partition: string): void {
+    if (partition === SHARED_PARTITION) return
+    for (const t of this.tabs.values()) if (t.partition === partition) return
+    this.preparedPartitions.delete(partition)
+    const s = electronSession.fromPartition(partition)
+    this.adblock?.detachSession(s)
+    void s.clearStorageData().catch(() => undefined)
+    void s.clearCache().catch(() => undefined)
+  }
+
   // ---------- 탭 생성 ----------
 
-  private createTab(insertAfter?: number): Tab {
+  private createTab(insertAfter?: number, inheritFrom?: number): Tab {
+    const partition = this.partitionFor(inheritFrom)
     const view = new WebContentsView({
       webPreferences: {
-        session: this.session,
+        session: this.sessionFor(partition),
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -137,6 +178,7 @@ export class TabManager extends EventEmitter {
     const tab: Tab = {
       id,
       view,
+      partition,
       blank: true,
       pending: null,
       lastInputAt: 0,
@@ -155,8 +197,12 @@ export class TabManager extends EventEmitter {
     return tab
   }
 
-  newTab(url?: string, activate = true, insertAfter?: number): number {
-    const tab = this.createTab(insertAfter)
+  /**
+   * @param insertAfter 이 탭 바로 오른쪽에 넣는다
+   * @param inheritFrom 이 탭의 세션(쿠키)을 물려받는다 (팝업, 새 탭 링크, 복제)
+   */
+  newTab(url?: string, activate = true, insertAfter?: number, inheritFrom?: number): number {
+    const tab = this.createTab(insertAfter, inheritFrom)
     if (activate || this.activeId === null) this.activeId = tab.id
     this.layout()
     this.emitState()
@@ -165,8 +211,8 @@ export class TabManager extends EventEmitter {
     return tab.id
   }
 
-  private addSavedTab(saved: SavedTab, activate: boolean, insertAfter?: number): number {
-    const tab = this.createTab(insertAfter)
+  private addSavedTab(saved: SavedTab, activate: boolean, insertAfter?: number, inheritFrom?: number): number {
+    const tab = this.createTab(insertAfter, inheritFrom)
     tab.blank = false
     tab.pending = saved
     tab.state.url = saved.url
@@ -186,14 +232,24 @@ export class TabManager extends EventEmitter {
     tab.pending = null
     const wc = tab.view.webContents
     const nav = wc.navigationHistory as unknown as { restore?: (o: { entries: NavEntry[]; index?: number }) => Promise<void> }
+    const fallback = (): void => {
+      if (wc.isDestroyed()) return
+      try {
+        void wc.loadURL(saved.url).catch(() => undefined)
+      } catch {
+        /* 탭이 그 사이 닫힘 */
+      }
+    }
     if (typeof nav.restore === 'function' && saved.entries.length) {
       const index = Math.min(Math.max(0, saved.index), saved.entries.length - 1)
-      nav.restore({ entries: saved.entries, index }).catch(() => {
-        void wc.loadURL(saved.url).catch(() => undefined)
-      })
+      try {
+        nav.restore({ entries: saved.entries, index }).catch(fallback)
+      } catch {
+        fallback()
+      }
       return
     }
-    void wc.loadURL(saved.url).catch(() => undefined)
+    fallback()
   }
 
   private snapshot(tab: Tab): SavedTab | null {
@@ -386,7 +442,7 @@ export class TabManager extends EventEmitter {
     const pb = getSettings().popupBlock
     const pageHost = hostOf(tab.state.url)
     if (!pb.enabled || tab.blank || hostMatches(pb.allowlist, pageHost)) {
-      this.newTab(url, activate, tab.id)
+      this.newTab(url, activate, tab.id, tab.id)
       return
     }
     const now = Date.now()
@@ -410,7 +466,7 @@ export class TabManager extends EventEmitter {
         tab.lastPopupInputAt = -1
         this.blockPopup(tab, url, 'tab-under')
       } else {
-        this.newTab(url, activate, tab.id)
+        this.newTab(url, activate, tab.id, tab.id)
       }
     }, TAB_UNDER_PROBATION_MS)
   }
@@ -433,7 +489,7 @@ export class TabManager extends EventEmitter {
     if (!/^https?:/i.test(url)) return
     const tab = this.tabs.get(tabId)
     if (tab) tab.blockedPopups = tab.blockedPopups.filter((p) => p.url !== url)
-    this.newTab(url, true, tab ? tabId : undefined)
+    this.newTab(url, true, tab ? tabId : undefined, tab ? tabId : undefined)
   }
 
   setPopupAllowed(host: string, allowed: boolean): void {
@@ -517,7 +573,7 @@ export class TabManager extends EventEmitter {
     }
     if (params.linkURL) {
       items.push(
-        { label: '새 탭에서 링크 열기', click: () => this.newTab(params.linkURL, false, tab.id) },
+        { label: '새 탭에서 링크 열기', click: () => this.newTab(params.linkURL, false, tab.id, tab.id) },
         { label: '링크 주소 복사', click: () => clipboard.writeText(params.linkURL) },
         { label: '링크로 다운로드 시도', click: () => this.emit('downloadUrl', params.linkURL, wc.getURL()) },
         { type: 'separator' }
@@ -606,6 +662,7 @@ export class TabManager extends EventEmitter {
       /* ignore */
     }
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close()
+    this.releasePartition(tab.partition)
     if (wasActive) {
       const next = this.order[Math.min(idx, this.order.length - 1)] ?? null
       this.activeId = next
@@ -635,8 +692,8 @@ export class TabManager extends EventEmitter {
     const tab = this.tabs.get(id)
     if (!tab) return null
     const snap = this.snapshot(tab)
-    if (!snap) return this.newTab(undefined, true, id)
-    return this.addSavedTab(snap, true, id)
+    if (!snap) return this.newTab(undefined, true, id, id)
+    return this.addSavedTab(snap, true, id, id)
   }
 
   reopenClosedTab(): number | null {

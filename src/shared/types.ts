@@ -20,6 +20,13 @@ export interface DetectedMedia {
   /** 스캔 출처 (video, meta, jsonld, script, link, iframe, data) */
   source?: string
   poster?: string
+  /** 사전 조회 결과: 스캔 항목은 헤더만 받아 크기·형식 확인, HLS 는 재생목록을 읽어 길이·예상 용량 계산 */
+  probe?: { status: 'pending' | 'ok' | 'error'; httpStatus?: number; message?: string }
+  duration?: number
+  estimatedSize?: number
+  resolution?: string
+  variantCount?: number
+  live?: boolean
 }
 
 export interface ScanItem {
@@ -38,6 +45,13 @@ export interface ScanPayload {
 export interface PageScanSettings {
   enabled: boolean
   autoLoadMetadata: boolean
+}
+
+export interface PrivacySettings {
+  /** 새 탭마다 별도 세션(쿠키·저장소 분리). 페이지가 연 팝업과 새 탭 링크는 원래 탭 세션을 물려받는다. */
+  isolateTabs: boolean
+  /** 팝업/새 탭 링크/복제 탭이 원래 탭의 세션을 물려받을지 여부 */
+  inheritOnOpen: boolean
 }
 
 export interface TabState {
@@ -279,6 +293,7 @@ export interface Settings {
   adblock: AdblockSettings
   popupBlock: PopupBlockSettings
   pageScan: PageScanSettings
+  privacy: PrivacySettings
 }
 
 export interface AppNotification {

@@ -6,7 +6,7 @@ import { useDownloads } from '../hooks/useDownloads'
 import { Icon } from '../components/Icon'
 import { useConfirm } from '../components/Modal'
 import { Thumb } from '../components/Thumb'
-import { errorText, formatBytes, formatDate, hostOf } from '../lib/format'
+import { errorText, formatBytes, formatDate, formatDuration, hostOf } from '../lib/format'
 
 /** 사이드바 위쪽에 잠깐 펼치는 보조 패널. 감지된 동영상 목록은 항상 아래에 고정된다. */
 type Aux = 'none' | 'bookmarks' | 'history' | 'adblock'
@@ -17,6 +17,40 @@ const PANEL_TITLE: Record<Exclude<Aux, 'none'>, string> = {
   adblock: '광고 차단'
 }
 
+type SortMode = 'auto' | 'size' | 'recent'
+
+function loadSortMode(): SortMode {
+  try {
+    const v = localStorage.getItem('detected.sort')
+    return v === 'size' || v === 'recent' ? v : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+
+/** 정렬에 쓰는 크기: HLS 는 재생목록 파일 크기 대신 예상 용량을 쓴다 */
+function effectiveSize(m: DetectedMedia): number | null {
+  if (m.kind === 'hls') return m.estimatedSize ?? null
+  return m.size ?? m.estimatedSize ?? null
+}
+
+function sortDetected(list: DetectedMedia[], mode: SortMode): DetectedMedia[] {
+  const bySize = (a: DetectedMedia, b: DetectedMedia): number => {
+    const sa = effectiveSize(a)
+    const sb = effectiveSize(b)
+    if (sa === null && sb === null) return b.detectedAt - a.detectedAt
+    if (sa === null) return 1
+    if (sb === null) return -1
+    return sb - sa
+  }
+  const arr = [...list]
+  if (mode === 'recent') return arr.sort((a, b) => b.detectedAt - a.detectedAt)
+  if (mode === 'size') return arr.sort(bySize)
+  // auto: 받을 수 없는 항목은 맨 뒤, 페이지에서 발견한 항목 우선, 그 안에서 용량순
+  const rank = (m: DetectedMedia): number => (m.probe?.status === 'error' ? 2 : m.found === 'scan' ? 0 : 1)
+  return arr.sort((a, b) => rank(a) - rank(b) || bySize(a, b))
+}
+
 export function BrowserPage(): React.JSX.Element {
   const { settings, saveSettings, requestAnalyze, play, toast, focusAddressToken, page, setPage } = useApp()
   const [adblock, setAdblock] = useState<AdblockStatus | null>(null)
@@ -24,6 +58,15 @@ export function BrowserPage(): React.JSX.Element {
   const [popupStats, setPopupStats] = useState<PopupStats | null>(null)
   const [popupTick, setPopupTick] = useState(0)
   const [quickBusy, setQuickBusy] = useState<Set<string>>(new Set())
+  const [sortMode, setSortMode] = useState<SortMode>(loadSortMode)
+  const changeSort = (m: SortMode): void => {
+    setSortMode(m)
+    try {
+      localStorage.setItem('detected.sort', m)
+    } catch {
+      /* ignore */
+    }
+  }
   const tasks = useDownloads()
   const taskByUrl = useMemo(() => {
     const m = new Map<string, (typeof tasks)[number]>()
@@ -64,6 +107,7 @@ export function BrowserPage(): React.JSX.Element {
 
   const active: TabState | undefined = useMemo(() => state.tabs.find((t) => t.id === state.activeTabId), [state])
   const activeDetected = active ? (detected[active.id] ?? []) : []
+  const sortedDetected = useMemo(() => sortDetected(activeDetected, sortMode), [activeDetected, sortMode])
   const isBookmarked = !!active?.url && bookmarks.some((b) => b.url === active.url)
 
   const loadBookmarks = useCallback(() => void window.api.bookmarks.list().then(setBookmarks), [])
@@ -78,10 +122,18 @@ export function BrowserPage(): React.JSX.Element {
     const offDetected = window.api.browser.onDetected((item) =>
       setDetected((prev) => ({ ...prev, [item.tabId]: [...(prev[item.tabId] ?? []).filter((x) => x.url !== item.url), item] }))
     )
+    const offUpdated = window.api.browser.onDetectedUpdated((item) =>
+      setDetected((prev) => {
+        const list = prev[item.tabId]
+        if (!list) return prev
+        return { ...prev, [item.tabId]: list.map((x) => (x.id === item.id ? item : x)) }
+      })
+    )
     loadBookmarks()
     return () => {
       offState()
       offDetected()
+      offUpdated()
     }
   }, [loadBookmarks])
 
@@ -524,18 +576,23 @@ export function BrowserPage(): React.JSX.Element {
           <section className="video-panel">
             <header>
               <span className="grow">감지된 동영상{activeDetected.length > 0 ? ` (${activeDetected.length})` : ''}</span>
+              <select className="select sort-select" value={sortMode} onChange={(e) => changeSort(e.target.value as SortMode)} title="정렬 방식">
+                <option value="auto">자동 (발견 우선·용량순)</option>
+                <option value="size">용량순</option>
+                <option value="recent">감지 순서</option>
+              </select>
               {active?.url && (
                 <button
-                  className="btn sm ghost"
-                  title="현재 페이지 주소를 yt-dlp 로 분석해 재생 없이 화질 목록을 가져옵니다"
+                  className="icon-btn"
+                  title="이 페이지 분석: 현재 페이지 주소를 yt-dlp 로 분석해 재생 없이 화질 목록을 가져옵니다"
                   onClick={() => requestAnalyze({ url: active.url, pageUrl: active.url, pageTitle: active.title })}
                 >
-                  <Icon name="search" size={13} /> 이 페이지 분석
+                  <Icon name="search" size={16} />
                 </button>
               )}
               {active && activeDetected.length > 0 && (
-                <button className="btn sm ghost" onClick={() => void window.api.browser.clearDetected(active.id).then(() => setDetected((p) => ({ ...p, [active.id]: [] })))}>
-                  비우기
+                <button className="icon-btn" title="목록 비우기" onClick={() => void window.api.browser.clearDetected(active.id).then(() => setDetected((p) => ({ ...p, [active.id]: [] })))}>
+                  <Icon name="trash" size={16} />
                 </button>
               )}
             </header>
@@ -547,7 +604,7 @@ export function BrowserPage(): React.JSX.Element {
                     <span className="small">페이지에서 동영상을 재생하면 여기에 표시됩니다.</span>
                   </div>
                 ) : (
-                  [...activeDetected].reverse().map((m) => {
+                  sortedDetected.map((m) => {
                     const existing = taskByUrl.get(m.url)
                     const done = existing?.status === 'completed'
                     const inProgress = !!existing && !done && existing.status !== 'canceled' && existing.status !== 'error'
@@ -567,11 +624,19 @@ export function BrowserPage(): React.JSX.Element {
                               {m.filename || (m.kind === 'page' ? hostOf(m.url) : m.pageTitle || hostOf(m.url))}
                             </div>
                             <div className="meta">
-                              {m.size ? `${formatBytes(m.size)} · ` : ''}
+                              {m.size ? `${formatBytes(m.size)} · ` : m.estimatedSize ? `약 ${formatBytes(m.estimatedSize)} · ` : ''}
+                              {m.duration ? `${formatDuration(m.duration)} · ` : ''}
+                              {m.resolution ? `${m.resolution}${m.variantCount && m.variantCount > 1 ? ` 외 ${m.variantCount - 1}` : ''} · ` : ''}
                               {hostOf(m.url)}
                               {m.found === 'scan' && (
                                 <span className="scan-tag" title={`재생 전에 페이지에서 찾은 주소 (${m.source ?? 'scan'})`}>
                                   페이지에서 발견
+                                </span>
+                              )}
+                              {m.probe?.status === 'pending' && <span className="scan-tag">확인 중</span>}
+                              {m.probe?.status === 'error' && (
+                                <span className="scan-tag bad" title={m.probe.message}>
+                                  {m.probe.message ?? '받을 수 없음'}
                                 </span>
                               )}
                             </div>

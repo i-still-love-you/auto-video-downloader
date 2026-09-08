@@ -5,6 +5,7 @@ import type { DetectedMedia, MediaKind, ScanPayload } from '@shared/types'
 import { basenameOfUrl, extOfUrl, isMediaExt, mimeFromExt, newId, parseContentDisposition } from '../util'
 import { cookieHeaderFor } from '../downloads/net'
 import { getSettings } from '../settings'
+import { Prober } from './prober'
 
 const SKIP_EXT = new Set([
   'ts', 'm4s', 'm4f', 'vtt', 'srt', 'key', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'js', 'css', 'html',
@@ -74,22 +75,30 @@ function totalSize(h: Record<string, string>): number | null {
 const KEEP_REQUEST_HEADERS = ['referer', 'origin', 'user-agent', 'cookie', 'accept-language', 'authorization']
 
 /**
- * 브라우저 세션의 네트워크 응답을 감시해 동영상 소스를 찾아낸다.
+ * 브라우저 탭들의 네트워크 응답을 감시해 동영상 소스를 찾아낸다. 탭마다 세션이 다를 수 있으므로
+ * 쿠키와 User-Agent 는 요청을 보낸 탭의 세션에서 읽는다.
  * webRequest 리스너는 세션당 하나만 허용되므로 직접 등록하지 않고, 세션 소유자가
  * handleBeforeSendHeaders / handleHeadersReceived 를 자기 리스너 안에서 호출한다.
- * 이벤트: 'detected' (DetectedMedia), 'changed' (tabId)
+ * 이벤트: 'detected' (DetectedMedia), 'updated' (DetectedMedia, 사전 조회 결과 등 갱신), 'changed' (tabId)
  */
 export class Sniffer extends EventEmitter {
   private byTab = new Map<number, DetectedMedia[]>()
   private seen = new Map<number, Set<string>>()
   private reqHeaders = new Map<number, Record<string, string>>()
   private reqOrder: number[] = []
+  private prober = new Prober((item) => {
+    // 그 사이 탭이 이동해 목록에서 빠진 항목이면 알리지 않는다
+    if (this.byTab.get(item.tabId)?.includes(item)) this.emit('updated', item)
+  })
 
-  constructor(
-    private readonly session: Session,
-    private readonly isTab: (id: number) => boolean
-  ) {
+  constructor(private readonly isTab: (id: number) => boolean) {
     super()
+  }
+
+  private needsProbe(item: DetectedMedia): boolean {
+    if (item.probe) return false
+    if (item.kind === 'hls') return true
+    return item.kind === 'file' && item.size === null
   }
 
   handleBeforeSendHeaders(details: Electron.OnBeforeSendHeadersListenerDetails): void {
@@ -143,9 +152,14 @@ export class Sniffer extends EventEmitter {
           existing.mime = c.mime
           existing.kind = c.kind
           if (c.filename) existing.filename = c.filename
+          if (existing.size !== null && existing.probe?.status !== 'ok') existing.probe = { status: 'ok', httpStatus: details.statusCode }
           changed = true
         }
-        if (changed) this.emit('changed', tabId)
+        if (changed) {
+          this.emit('updated', existing)
+          this.emit('changed', tabId)
+          if (this.needsProbe(existing)) this.prober.enqueue(existing)
+        }
       }
       return
     }
@@ -159,7 +173,7 @@ export class Sniffer extends EventEmitter {
     const headers: Record<string, string> = {}
     for (const [k, v] of Object.entries(reqH)) headers[canonicalKey(k)] = v
     if (!headers.Referer) headers.Referer = details.referrer || pageUrl
-    if (!headers['User-Agent']) headers['User-Agent'] = this.session.getUserAgent()
+    if (!headers['User-Agent']) headers['User-Agent'] = wc.session.getUserAgent()
 
     const item: DetectedMedia = {
       id: newId(),
@@ -175,10 +189,10 @@ export class Sniffer extends EventEmitter {
       detectedAt: Date.now(),
       found: 'network'
     }
-    this.pushItem(item)
+    this.pushItem(item, wc.session)
   }
 
-  private pushItem(item: DetectedMedia): void {
+  private pushItem(item: DetectedMedia, session: Session): void {
     const finish = (): void => {
       const list = this.byTab.get(item.tabId) ?? []
       this.byTab.set(item.tabId, list)
@@ -186,10 +200,11 @@ export class Sniffer extends EventEmitter {
       if (list.length > MAX_PER_TAB) list.splice(0, list.length - MAX_PER_TAB)
       this.emit('detected', item)
       this.emit('changed', item.tabId)
+      if (this.needsProbe(item)) this.prober.enqueue(item)
     }
     if (item.headers.Cookie) finish()
     else
-      cookieHeaderFor(this.session, item.url)
+      cookieHeaderFor(session, item.url)
         .then((ck) => {
           if (ck) item.headers.Cookie = ck
         })
@@ -223,13 +238,13 @@ export class Sniffer extends EventEmitter {
         filename: raw.kind !== 'page' && isMediaExt(ext) ? basenameOfUrl(raw.url) : null,
         pageUrl,
         pageTitle,
-        headers: { Referer: pageUrl, 'User-Agent': this.session.getUserAgent() },
+        headers: { Referer: pageUrl, 'User-Agent': wc.session.getUserAgent() },
         detectedAt: Date.now(),
         found: 'scan',
         source: typeof raw.source === 'string' ? raw.source.slice(0, 20) : undefined,
         poster: typeof raw.poster === 'string' && /^https?:\/\//i.test(raw.poster) ? raw.poster : undefined
       }
-      this.pushItem(item)
+      this.pushItem(item, wc.session)
       added++
     }
     if (added) this.emit('changed', tabId)

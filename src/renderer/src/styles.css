@@ -448,10 +448,21 @@ a {
 .side-panel header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   font-weight: 600;
+}
+.side-panel header .grow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sort-select {
+  font-size: 11px;
+  font-weight: 400;
+  padding: 3px 6px;
+  max-width: 150px;
 }
 .side-panel .list {
   flex: 1;
@@ -576,6 +587,10 @@ a {
   color: var(--muted);
   font-size: 10px;
   line-height: 15px;
+}
+.scan-tag.bad {
+  background: #5a2a2c;
+  color: #ffb3b5;
 }
 
 .list-item {

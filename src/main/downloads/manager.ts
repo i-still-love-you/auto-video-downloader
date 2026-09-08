@@ -50,7 +50,8 @@ export class DownloadManager extends EventEmitter {
   private running = new Map<string, Running>()
   private samples = new Map<string, Array<{ t: number; b: number }>>()
   private emitTimers = new Map<string, NodeJS.Timeout>()
-  private browserSession: Session | null = null
+  private resolveSession: (tabId?: number) => Session | null = () => null
+  private userAgent = DEFAULT_UA
   private logs = new Map<string, string[]>()
 
   constructor() {
@@ -58,8 +59,10 @@ export class DownloadManager extends EventEmitter {
     this.store = new JsonStore<StoreData>(path.join(app.getPath('userData'), 'downloads.json'), () => ({ tasks: [] }))
   }
 
-  setBrowserSession(s: Session): void {
-    this.browserSession = s
+  /** 탭마다 세션이 다르므로, 쿠키를 읽을 세션을 탭 id 로 찾는 함수를 받는다. tabId 가 없으면 활성 탭. */
+  setSessionResolver(resolve: (tabId?: number) => Session | null, userAgent: string): void {
+    this.resolveSession = resolve
+    this.userAgent = userAgent
   }
 
   async init(): Promise<void> {
@@ -97,24 +100,24 @@ export class DownloadManager extends EventEmitter {
 
   // ---------- 분석 ----------
 
-  private async enrichHeaders(url: string, headers: Record<string, string>, pageUrl?: string): Promise<Record<string, string>> {
+  private async enrichHeaders(url: string, headers: Record<string, string>, pageUrl?: string, tabId?: number): Promise<Record<string, string>> {
     const h = normalizeHeaders(headers)
     if (!headerValue(h, 'referer') && pageUrl) h.Referer = pageUrl
-    if (!headerValue(h, 'user-agent')) h['User-Agent'] = this.browserSession?.getUserAgent() ?? DEFAULT_UA
+    if (!headerValue(h, 'user-agent')) h['User-Agent'] = this.userAgent
     if (!headerValue(h, 'cookie')) {
-      const ck = await cookieHeaderFor(this.browserSession, url)
+      const ck = await cookieHeaderFor(this.resolveSession(tabId), url)
       if (ck) h.Cookie = ck
     }
     return h
   }
 
-  async analyze(rawUrl: string, headers: Record<string, string> = {}, pageUrl?: string, pageTitle?: string): Promise<AnalyzeResult> {
+  async analyze(rawUrl: string, headers: Record<string, string> = {}, pageUrl?: string, pageTitle?: string, tabId?: number): Promise<AnalyzeResult> {
     const url = rawUrl.trim()
     if (!/^https?:\/\//i.test(url)) throw new Error('http(s) 주소만 분석할 수 있습니다')
-    const hdrs = await this.enrichHeaders(url, headers, pageUrl)
+    const hdrs = await this.enrichHeaders(url, headers, pageUrl, tabId)
     const ext = extOfUrl(url)
     if (ext === 'm3u8') return this.analyzeHls(url, hdrs, pageUrl, pageTitle)
-    if (ext === 'mpd') return this.analyzeYtdlp(url, hdrs, pageUrl)
+    if (ext === 'mpd') return this.analyzeYtdlp(url, hdrs, pageUrl, tabId)
 
     let probe: Probe | null = null
     try {
@@ -128,18 +131,18 @@ export class DownloadManager extends EventEmitter {
       if (c?.kind === 'file' || (isMediaExt(ext) && !/text\/html/i.test(probe.mime))) {
         return this.fileResult(url, hdrs, probe, pageUrl, pageTitle)
       }
-      if (c?.kind === 'dash') return this.analyzeYtdlp(url, hdrs, pageUrl)
+      if (c?.kind === 'dash') return this.analyzeYtdlp(url, hdrs, pageUrl, tabId)
     }
-    return this.analyzeYtdlp(url, hdrs, pageUrl)
+    return this.analyzeYtdlp(url, hdrs, pageUrl, tabId)
   }
 
   async analyzeDetected(item: DetectedMedia): Promise<AnalyzeResult> {
-    const hdrs = await this.enrichHeaders(item.url, item.headers, item.pageUrl)
+    const hdrs = await this.enrichHeaders(item.url, item.headers, item.pageUrl, item.tabId)
     if (item.kind === 'hls') return this.analyzeHls(item.url, hdrs, item.pageUrl, item.pageTitle)
-    if (item.kind === 'dash' || item.kind === 'page') return this.analyzeYtdlp(item.url, hdrs, item.pageUrl)
+    if (item.kind === 'dash' || item.kind === 'page') return this.analyzeYtdlp(item.url, hdrs, item.pageUrl, item.tabId)
     if (item.found === 'scan') {
       // 페이지에서 긁은 주소는 실제로 받을 수 있는지 먼저 확인한다
-      return this.analyze(item.url, hdrs, item.pageUrl, item.pageTitle)
+      return this.analyze(item.url, hdrs, item.pageUrl, item.pageTitle, item.tabId)
     }
     return {
       kind: 'file',
@@ -202,10 +205,10 @@ export class DownloadManager extends EventEmitter {
     return { kind: 'hls', url, title, duration: parsed.totalDuration, headers, pageUrl }
   }
 
-  private async analyzeYtdlp(url: string, headers: Record<string, string>, pageUrl?: string): Promise<AnalyzeResult> {
+  private async analyzeYtdlp(url: string, headers: Record<string, string>, pageUrl?: string, tabId?: number): Promise<AnalyzeResult> {
     const ytdlp = await toolPath('ytdlp')
     if (!ytdlp) throw new Error('이 주소는 yt-dlp 로 분석해야 합니다. 설정 > 도구에서 yt-dlp 를 설치해 주세요.')
-    const cookieFile = await exportCookieFile(this.browserSession, pageUrl ?? url)
+    const cookieFile = await exportCookieFile(this.resolveSession(tabId), pageUrl ?? url)
     const clean = { ...headers }
     delete clean.Cookie
     if (!cookieFile && headers.Cookie) clean.Cookie = headers.Cookie

@@ -1,7 +1,11 @@
 import { app } from 'electron'
 import path from 'node:path'
 import { JsonStore } from './storage/jsonStore'
-import type { AdblockSettings, PageScanSettings, PopupBlockSettings, Settings } from '@shared/types'
+import type { AdblockSettings, PageScanSettings, PopupBlockSettings, PrivacySettings, Settings } from '@shared/types'
+
+export function defaultPrivacy(): PrivacySettings {
+  return { isolateTabs: true, inheritOnOpen: true }
+}
 
 export function defaultPopupBlock(): PopupBlockSettings {
   return { enabled: true, allowlist: [] }
@@ -43,7 +47,8 @@ export function defaultSettings(): Settings {
     interceptBrowserDownloads: true,
     adblock: defaultAdblock(),
     popupBlock: defaultPopupBlock(),
-    pageScan: defaultPageScan()
+    pageScan: defaultPageScan(),
+    privacy: defaultPrivacy()
   }
 }
 
@@ -56,6 +61,7 @@ export async function initSettings(): Promise<Settings> {
   s.adblock = { ...defaultAdblock(), ...(s.adblock ?? {}) }
   s.popupBlock = { ...defaultPopupBlock(), ...(s.popupBlock ?? {}) }
   s.pageScan = { ...defaultPageScan(), ...(s.pageScan ?? {}) }
+  s.privacy = { ...defaultPrivacy(), ...(s.privacy ?? {}) }
   return s
 }
 
@@ -73,6 +79,7 @@ export function updateSettings(patch: Partial<Settings>): Settings {
   if (clean.adblock !== undefined) clean.adblock = { ...store.get().adblock, ...clean.adblock }
   if (clean.popupBlock !== undefined) clean.popupBlock = { ...store.get().popupBlock, ...clean.popupBlock }
   if (clean.pageScan !== undefined) clean.pageScan = { ...store.get().pageScan, ...clean.pageScan }
+  if (clean.privacy !== undefined) clean.privacy = { ...store.get().privacy, ...clean.privacy }
   return store.set(clean)
 }
 

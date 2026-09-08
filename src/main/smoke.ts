@@ -9,6 +9,32 @@ import { getSettings } from './settings'
 import { localThumbnail, remoteThumbnail } from './thumbnails'
 import { IPC } from '@shared/ipc'
 
+/** 탭 세션 격리 점검: 각 탭의 세션이 메모리 전용인지, 서로 다른지, 쿠키가 새는지 확인한다. */
+async function checkSessions(tabs: TabManager): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {}
+  const { webContents } = await import('electron')
+  const withUrl = tabs.getState().tabs.filter((t) => /^https?:/.test(t.url))
+  const wcs = withUrl.map((t) => webContents.fromId(t.id)).filter((w): w is Electron.WebContents => !!w && !w.isDestroyed())
+  out.tabs = wcs.map((w, i) => ({ id: w.id, url: w.getURL(), persistent: w.session.isPersistent(), sameSessionAsFirst: i === 0 ? null : w.session === wcs[0].session }))
+  if (wcs.length >= 2) {
+    const url = wcs[0].getURL()
+    try {
+      await wcs[0].session.cookies.set({ url, name: 'vdl_probe', value: '1' })
+      const inFirst = (await wcs[0].session.cookies.get({ url })).some((c) => c.name === 'vdl_probe')
+      const inSecond = (await wcs[1].session.cookies.get({ url })).some((c) => c.name === 'vdl_probe')
+      out.cookieProbe = { setInFirst: inFirst, leakedToSecond: inSecond }
+    } catch (e) {
+      out.cookieProbeError = String(e)
+    }
+    // 복제 탭은 원래 탭 세션을 물려받아야 한다
+    const dupId = tabs.duplicateTab(wcs[0].id)
+    const dup = dupId !== null ? webContents.fromId(dupId) : null
+    out.duplicateSharesSession = dup ? dup.session === wcs[0].session : null
+    if (dupId !== null) tabs.closeTab(dupId)
+  }
+  return out
+}
+
 async function checkThumbnails(sniffer: Sniffer): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {}
   try {
@@ -164,6 +190,7 @@ export function runSmoke(win: BrowserWindow, tabs: TabManager, sniffer: Sniffer,
       detected: sniffer.getDetected(),
       console: consoleLines,
       popups: smokeTabId !== null ? tabs.popupStats(smokeTabId) : null,
+      sessions: await checkSessions(tabs),
       protocols: await checkProtocols(sniffer),
       thumbnails: await checkThumbnails(sniffer),
       adblock: adblock
