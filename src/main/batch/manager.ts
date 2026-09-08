@@ -292,11 +292,13 @@ class JobRunner {
     // 일시정지된 다운로드는 자리를 차지하지 않는다 (사용자가 멈춘 항목 때문에 나머지가 막히지 않도록)
     const windowSize = getSettings().maxConcurrent + 2
     let active = counts.queued + counts.downloading + this.resolving
+    let dirty = false
     while (this.resolving < RESOLVE_PARALLEL && active < windowSize) {
       const item = job.items.find((i) => i.status === 'found')
       if (!item) break
       item.status = 'resolving'
       item.error = undefined
+      dirty = true
       this.resolving++
       active++
       void this.resolve(item).finally(() => {
@@ -307,7 +309,9 @@ class JobRunner {
         }
       })
     }
-    this.mgr.changed(job)
+    // 갱신 알림은 작업 전체(항목 수천 개)를 렌더러에 보낸다. 다운로드 진행률이 올 때마다 kick() 이 불리므로
+    // 여기서 매번 보내면 렌더러가 갱신에 파묻힌다. 실제로 바뀐 것이 있을 때만 보낸다.
+    if (dirty) this.mgr.changed(job)
   }
 
   private async crawlNext(): Promise<void> {

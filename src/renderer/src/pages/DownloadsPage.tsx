@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DownloadTask } from '@shared/types'
 import type { DownloadRecord } from '@shared/dedupe'
 import { useApp } from '../state/AppContext'
@@ -10,6 +10,9 @@ import { Thumb, type ThumbSource } from '../components/Thumb'
 import { errorText, fileNameOf, formatBytes, formatDate, formatDuration, formatEta, formatSpeed, hostOf } from '../lib/format'
 
 type Filter = 'all' | 'active' | 'done'
+
+/** 한 번에 그리는 행 수. 수천 개를 한꺼번에 그리면 갱신마다 느려지므로 "더 보기"로 늘린다 */
+const TASK_PAGE = 100
 
 const STATUS_LABEL: Record<DownloadTask['status'], string> = {
   queued: '대기 중',
@@ -36,6 +39,8 @@ export function DownloadsPage(): React.JSX.Element {
     if (filter === 'done') return tasks.filter((t) => t.status === 'completed')
     return tasks
   }, [tasks, filter])
+  const [limit, setLimit] = useState(TASK_PAGE)
+  useEffect(() => setLimit(TASK_PAGE), [filter])
 
   const submit = (e: React.FormEvent): void => {
     e.preventDefault()
@@ -55,31 +60,41 @@ export function DownloadsPage(): React.JSX.Element {
     }
   }
 
-  const playTask = (t: DownloadTask): void => {
-    if (!t.filePath) return
-    const src = `media://local/?p=${encodeURIComponent(t.filePath)}`
-    play({ id: `file:${t.filePath}`, title: fileNameOf(t.filePath), src, kind: 'local', path: t.filePath })
-  }
+  // 행 컴포넌트는 memo 되어 있으므로 여기서 넘기는 함수의 참조가 유지되어야 바뀐 행만 다시 그린다
+  const playTask = useCallback(
+    (t: DownloadTask): void => {
+      if (!t.filePath) return
+      const src = `media://local/?p=${encodeURIComponent(t.filePath)}`
+      play({ id: `file:${t.filePath}`, title: fileNameOf(t.filePath), src, kind: 'local', path: t.filePath })
+    },
+    [play]
+  )
 
-  const removeTask = async (t: DownloadTask): Promise<void> => {
-    if (t.status === 'completed' && t.filePath) {
-      const ok = await confirm(`목록에서 제거할까요?\n파일은 남겨 둡니다: ${fileNameOf(t.filePath)}`)
-      if (ok) await window.api.downloads.remove(t.id, false)
-      return
-    }
-    const ok = t.status === 'running' || t.status === 'paused' ? await confirm('진행 중인 다운로드를 취소하고 목록에서 제거할까요?', { danger: true }) : true
-    if (ok) await window.api.downloads.remove(t.id, true)
-  }
+  const removeTask = useCallback(
+    async (t: DownloadTask): Promise<void> => {
+      if (t.status === 'completed' && t.filePath) {
+        const ok = await confirm(`목록에서 제거할까요?\n파일은 남겨 둡니다: ${fileNameOf(t.filePath)}`)
+        if (ok) await window.api.downloads.remove(t.id, false)
+        return
+      }
+      const ok = t.status === 'running' || t.status === 'paused' ? await confirm('진행 중인 다운로드를 취소하고 목록에서 제거할까요?', { danger: true }) : true
+      if (ok) await window.api.downloads.remove(t.id, true)
+    },
+    [confirm]
+  )
 
-  const deleteWithFile = async (t: DownloadTask): Promise<void> => {
-    const ok = await confirm(`파일까지 삭제할까요?\n${t.filePath ?? ''}`, { danger: true, title: '파일 삭제' })
-    if (ok) await window.api.downloads.remove(t.id, true)
-  }
+  const deleteWithFile = useCallback(
+    async (t: DownloadTask): Promise<void> => {
+      const ok = await confirm(`파일까지 삭제할까요?\n${t.filePath ?? ''}`, { danger: true, title: '파일 삭제' })
+      if (ok) await window.api.downloads.remove(t.id, true)
+    },
+    [confirm]
+  )
 
-  const showLog = async (t: DownloadTask): Promise<void> => {
+  const showLog = useCallback(async (t: DownloadTask): Promise<void> => {
     setLog(await window.api.downloads.getLog(t.id))
     setLogTask(t)
-  }
+  }, [])
 
   return (
     <>
@@ -121,7 +136,16 @@ export function DownloadsPage(): React.JSX.Element {
             )}
           </div>
         ) : (
-          visible.map((t) => <TaskRow key={t.id} task={t} onPlay={playTask} onRemove={removeTask} onDeleteFile={deleteWithFile} onLog={showLog} />)
+          <>
+            {visible.slice(0, limit).map((t) => (
+              <TaskRow key={t.id} task={t} onPlay={playTask} onRemove={removeTask} onDeleteFile={deleteWithFile} onLog={showLog} />
+            ))}
+            {visible.length > limit && (
+              <button className="btn" style={{ display: 'block', margin: '10px auto' }} onClick={() => setLimit((l) => l + TASK_PAGE)}>
+                더 보기 (남은 {visible.length - limit}개)
+              </button>
+            )}
+          </>
         )}
       </div>
       {logTask && (
@@ -232,7 +256,8 @@ function HistoryDialog({
   )
 }
 
-function TaskRow({
+/** 다운로드 한 줄. memo 로 감싸 갱신된 항목의 행만 다시 그린다 (진행률은 250ms 마다 오므로 중요) */
+const TaskRow = React.memo(function TaskRow({
   task: t,
   onPlay,
   onRemove,
@@ -344,4 +369,4 @@ function TaskRow({
       </div>
     </div>
   )
-}
+})

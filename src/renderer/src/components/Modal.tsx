@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useApp } from '../state/AppContext'
 import { Icon } from './Icon'
 
@@ -50,8 +50,11 @@ interface ConfirmState {
 /** 확인 다이얼로그 훅: const [confirm, dialog] = useConfirm() */
 export function useConfirm(): [(message: string, opts?: { title?: string; danger?: boolean }) => Promise<boolean>, React.ReactNode] {
   const [state, setState] = useState<ConfirmState | null>(null)
-  const confirm = (message: string, opts?: { title?: string; danger?: boolean }): Promise<boolean> =>
-    new Promise<boolean>((resolve) => setState({ message, resolve, ...opts }))
+  // 참조가 바뀌지 않아야 이 함수를 쓰는 memo 된 행 컴포넌트가 불필요하게 다시 그려지지 않는다
+  const confirm = useCallback(
+    (message: string, opts?: { title?: string; danger?: boolean }): Promise<boolean> => new Promise<boolean>((resolve) => setState({ message, resolve, ...opts })),
+    []
+  )
   const close = (ok: boolean): void => {
     state?.resolve(ok)
     setState(null)
@@ -81,8 +84,10 @@ export function useConfirm(): [(message: string, opts?: { title?: string; danger
 /** 입력 다이얼로그 훅 */
 export function usePrompt(): [(title: string, initial?: string, label?: string) => Promise<string | null>, React.ReactNode] {
   const [state, setState] = useState<{ title: string; label?: string; value: string; resolve: (v: string | null) => void } | null>(null)
-  const prompt = (title: string, initial = '', label?: string): Promise<string | null> =>
-    new Promise((resolve) => setState({ title, label, value: initial, resolve }))
+  const prompt = useCallback(
+    (title: string, initial = '', label?: string): Promise<string | null> => new Promise((resolve) => setState({ title, label, value: initial, resolve })),
+    []
+  )
   const close = (ok: boolean): void => {
     state?.resolve(ok ? state.value : null)
     setState(null)

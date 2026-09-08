@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import type { BatchItem, BatchItemStatus, BatchJob, BatchOptions, BatchPreview, BatchStatus, PreferredQuality } from '@shared/types'
 import { useApp } from '../state/AppContext'
 import { useBatch } from '../hooks/useBatch'
@@ -28,6 +28,9 @@ const QUALITY: Array<{ v: FormOptions['quality']; label: string }> = [
   { v: '480', label: '480p 이하' },
   { v: 'worst', label: '최저 화질' }
 ]
+
+/** 펼친 작업에서 한 번에 그리는 항목 수. 수천 개를 한꺼번에 그리지 않도록 "더 보기"로 늘린다 */
+const ITEM_PAGE = 200
 
 const JOB_LABEL: Record<BatchStatus, string> = {
   running: '실행 중',
@@ -174,29 +177,41 @@ export function BatchPage({ active }: { active: boolean }): React.JSX.Element {
     }
   }
 
-  const act = async (fn: () => Promise<unknown>): Promise<void> => {
-    try {
-      await fn()
-    } catch (e) {
-      toast({ type: 'error', message: errorText(e) })
-    }
-  }
+  // 아래 함수들은 memo 된 JobCard/ItemRow 에 넘어가므로 참조가 유지되어야 바뀐 행만 다시 그린다
+  const act = useCallback(
+    async (fn: () => Promise<unknown>): Promise<void> => {
+      try {
+        await fn()
+      } catch (e) {
+        toast({ type: 'error', message: errorText(e) })
+      }
+    },
+    [toast]
+  )
 
-  const removeJob = async (job: BatchJob): Promise<void> => {
-    const c = countOf(job)
-    const activeCount = c.queued + c.downloading + c.paused
-    if (activeCount > 0) {
-      const ok = await confirm(`진행 중인 다운로드 ${activeCount}개를 취소하고 작업을 제거할까요?\n(취소하지 않으려면 먼저 일시정지하세요)`, { danger: true })
-      if (!ok) return
-      await act(() => window.api.batch.remove(job.id, true))
-      return
-    }
-    await act(() => window.api.batch.remove(job.id, false))
-  }
+  const removeJob = useCallback(
+    async (job: BatchJob): Promise<void> => {
+      const c = countOf(job)
+      const activeCount = c.queued + c.downloading + c.paused
+      if (activeCount > 0) {
+        const ok = await confirm(`진행 중인 다운로드 ${activeCount}개를 취소하고 작업을 제거할까요?\n(취소하지 않으려면 먼저 일시정지하세요)`, { danger: true })
+        if (!ok) return
+        await act(() => window.api.batch.remove(job.id, true))
+        return
+      }
+      await act(() => window.api.batch.remove(job.id, false))
+    },
+    [confirm, act]
+  )
 
-  const openInBrowser = (u: string): void => {
-    void window.api.browser.newTab(u).then(() => setPage('browser'))
-  }
+  const openInBrowser = useCallback(
+    (u: string): void => {
+      void window.api.browser.newTab(u).then(() => setPage('browser'))
+    },
+    [setPage]
+  )
+
+  const toggleExpanded = useCallback((id: string) => setExpanded((cur) => (cur === id ? null : id)), [])
 
   const runningCount = jobs.filter((j) => j.status === 'running').length
 
@@ -322,10 +337,10 @@ export function BatchPage({ active }: { active: boolean }): React.JSX.Element {
               key={job.id}
               job={job}
               expanded={expanded === job.id}
-              onToggle={() => setExpanded(expanded === job.id ? null : job.id)}
+              onToggle={toggleExpanded}
               itemFilter={itemFilter}
               setItemFilter={setItemFilter}
-              onRemove={() => void removeJob(job)}
+              onRemove={removeJob}
               onOpen={openInBrowser}
               act={act}
               visible={active}
@@ -338,7 +353,8 @@ export function BatchPage({ active }: { active: boolean }): React.JSX.Element {
   )
 }
 
-function JobCard({
+/** 작업 카드. memo 로 감싸 다른 작업의 갱신에는 다시 그리지 않는다 */
+const JobCard = React.memo(function JobCard({
   job,
   expanded,
   onToggle,
@@ -351,15 +367,17 @@ function JobCard({
 }: {
   job: BatchJob
   expanded: boolean
-  onToggle: () => void
+  onToggle: (id: string) => void
   itemFilter: 'all' | 'active' | 'error' | 'done'
   setItemFilter: (f: 'all' | 'active' | 'error' | 'done') => void
-  onRemove: () => void
+  onRemove: (job: BatchJob) => void
   onOpen: (url: string) => void
   act: (fn: () => Promise<unknown>) => Promise<void>
   visible: boolean
 }): React.JSX.Element {
   const c = useMemo(() => countOf(job), [job])
+  const [limit, setLimit] = useState(ITEM_PAGE)
+  useEffect(() => setLimit(ITEM_PAGE), [itemFilter, expanded])
   const finished = c.completed + c.error + c.skipped
   const pct = c.total > 0 ? (finished / c.total) * 100 : 0
   const crawling = job.status === 'running' && !job.pages.done
@@ -407,10 +425,10 @@ function JobCard({
           <button className="icon-btn" title="목록 페이지 열기" onClick={() => onOpen(job.sourceUrl)}>
             <Icon name="open" />
           </button>
-          <button className="icon-btn" title="작업 제거 (받은 파일은 남음)" onClick={onRemove}>
+          <button className="icon-btn" title="작업 제거 (받은 파일은 남음)" onClick={() => void onRemove(job)}>
             <Icon name="close" />
           </button>
-          <button className={`icon-btn ${expanded ? 'active' : ''}`} title={expanded ? '접기' : '항목 보기'} onClick={onToggle}>
+          <button className={`icon-btn ${expanded ? 'active' : ''}`} title={expanded ? '접기' : '항목 보기'} onClick={() => onToggle(job.id)}>
             <Icon name="list" />
           </button>
         </div>
@@ -455,15 +473,25 @@ function JobCard({
               {c.total === 0 ? (crawling ? '목록 페이지를 읽는 중입니다...' : '발견한 영상이 없습니다') : '해당 조건의 항목이 없습니다'}
             </div>
           ) : (
-            items.map((it) => <ItemRow key={it.id} job={job} item={it} onOpen={onOpen} act={act} visible={visible} />)
+            <>
+              {items.slice(0, limit).map((it) => (
+                <ItemRow key={it.id} jobId={job.id} item={it} onOpen={onOpen} act={act} visible={visible} />
+              ))}
+              {items.length > limit && (
+                <button className="btn" style={{ display: 'block', margin: '8px auto' }} onClick={() => setLimit((l) => l + ITEM_PAGE)}>
+                  더 보기 (남은 {items.length - limit}개)
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
     </div>
   )
-}
+})
 
-function ItemRow({ job, item: it, onOpen, act, visible }: { job: BatchJob; item: BatchItem; onOpen: (url: string) => void; act: (fn: () => Promise<unknown>) => Promise<void>; visible: boolean }): React.JSX.Element {
+/** 항목 한 줄. memo 로 감싸 상태가 바뀐 항목만 다시 그린다 (useBatch 가 바뀌지 않은 항목의 참조를 유지해 준다) */
+const ItemRow = React.memo(function ItemRow({ jobId, item: it, onOpen, act, visible }: { jobId: string; item: BatchItem; onOpen: (url: string) => void; act: (fn: () => Promise<unknown>) => Promise<void>; visible: boolean }): React.JSX.Element {
   return (
     <div className={`batch-item ${it.status}`}>
       <Thumb source={visible && it.thumb ? { kind: 'url', url: it.thumb } : null} width={80} height={45} />
@@ -485,17 +513,17 @@ function ItemRow({ job, item: it, onOpen, act, visible }: { job: BatchJob; item:
       </div>
       <div className="actions">
         {it.status === 'paused' && (
-          <button className="icon-btn" title="이 다운로드 다시 시작" onClick={() => void act(() => window.api.batch.resumeItem(job.id, it.id))}>
+          <button className="icon-btn" title="이 다운로드 다시 시작" onClick={() => void act(() => window.api.batch.resumeItem(jobId, it.id))}>
             <Icon name="play" size={16} />
           </button>
         )}
         {(it.status === 'error' || it.status === 'skipped') && (
-          <button className="icon-btn" title="다시 시도" onClick={() => void act(() => window.api.batch.retryItem(job.id, it.id))}>
+          <button className="icon-btn" title="다시 시도" onClick={() => void act(() => window.api.batch.retryItem(jobId, it.id))}>
             <Icon name="reload" size={16} />
           </button>
         )}
         {it.status !== 'completed' && it.status !== 'skipped' && (
-          <button className="icon-btn" title={it.status === 'queued' || it.status === 'downloading' || it.status === 'paused' ? '다운로드 취소하고 건너뛰기' : '건너뛰기'} onClick={() => void act(() => window.api.batch.skipItem(job.id, it.id))}>
+          <button className="icon-btn" title={it.status === 'queued' || it.status === 'downloading' || it.status === 'paused' ? '다운로드 취소하고 건너뛰기' : '건너뛰기'} onClick={() => void act(() => window.api.batch.skipItem(jobId, it.id))}>
             <Icon name="close" size={16} />
           </button>
         )}
@@ -505,4 +533,4 @@ function ItemRow({ job, item: it, onOpen, act, visible }: { job: BatchJob; item:
       </div>
     </div>
   )
-}
+})

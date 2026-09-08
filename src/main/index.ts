@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, session, shell, webContents, type Session } from 'electron'
+import { app, BrowserWindow, Menu, dialog, session, shell, webContents, type Session } from 'electron'
 import path from 'node:path'
 import { installProtocols, registerSchemes } from './protocols'
 import { flushSettings, getSettings, initSettings } from './settings'
@@ -15,10 +15,17 @@ import { registerIpc } from './ipc'
 import { setupUpdater } from './updater'
 import { runSmoke } from './smoke'
 import { initThumbnails } from './thumbnails'
-import { ensureDir } from './util'
+import { ensureDir, errorMessage } from './util'
 import { IPC } from '@shared/ipc'
 
 registerSchemes()
+// 메인 프로세스에서 잡히지 않은 예외가 나면 Electron 은 기본적으로 모달 오류 창을 띄우고, 창을 닫을 때까지 다운로드를 포함한
+// 모든 처리가 멈춘다. 네트워크 라이브러리(undici) 내부 단언처럼 호출한 쪽에서 잡을 수 없는 비동기 오류가 간헐적으로 나므로
+// 기록하고 알린 뒤 계속 진행한다. (리스너를 등록하면 Electron 의 기본 오류 창은 뜨지 않는다)
+process.on('uncaughtException', (err) => {
+  console.error('메인 프로세스 예외 (계속 진행):', err)
+  if (win && !win.isDestroyed()) win.webContents.send(IPC.app.evNotify, { type: 'error', message: `내부 오류가 났지만 계속 진행합니다: ${errorMessage(err)}` })
+})
 // 포터블 모드/테스트용 사용자 데이터 폴더 지정
 if (process.env.VDL_USER_DATA) app.setPath('userData', path.resolve(process.env.VDL_USER_DATA))
 
@@ -77,6 +84,38 @@ async function createWindow(): Promise<void> {
     }
   })
   win.once('ready-to-show', () => win?.show())
+  // UI 렌더러가 죽으면 창에는 배경색만 남아 검게 보이고 아무 반응이 없다. 다운로드·크롤러는 메인 프로세스에서 돌고 있으므로
+  // UI 만 다시 불러오면 상태가 그대로 복원된다.
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (quitting || details.reason === 'clean-exit') return
+    console.error(`UI 렌더러가 종료되었습니다 (${details.reason}, exit ${details.exitCode}). 다시 불러옵니다.`)
+    const w = win
+    if (!w || w.isDestroyed()) return
+    w.webContents.once('did-finish-load', () => {
+      w.webContents.send(IPC.app.evNotify, { type: 'info', message: `화면이 예기치 않게 종료되어 다시 불러왔습니다 (${details.reason})` })
+    })
+    setTimeout(() => {
+      if (!w.isDestroyed()) w.webContents.reload()
+    }, 300)
+  })
+  win.webContents.on('unresponsive', () => {
+    const w = win
+    if (!w || w.isDestroyed() || quitting) return
+    void dialog
+      .showMessageBox(w, {
+        type: 'warning',
+        title: 'Video Downloader',
+        message: '화면이 응답하지 않습니다',
+        detail: '다운로드는 계속 진행됩니다. 화면만 다시 불러올 수 있습니다.',
+        buttons: ['다시 불러오기', '기다리기'],
+        defaultId: 1,
+        cancelId: 1
+      })
+      .then(({ response }) => {
+        // 강제 종료하면 위의 render-process-gone 처리에서 다시 불러온다
+        if (response === 0 && !w.isDestroyed()) w.webContents.forcefullyCrashRenderer()
+      })
+  })
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
@@ -197,6 +236,8 @@ app.whenReady().then(async () => {
   library = new Library()
   await library.init()
   library.importTasks(downloads.list())
+  // 이력에 옮겨 담은 뒤에 오래된 완료 항목을 목록에서 정리한다
+  downloads.pruneFinished()
   const lib = library
   downloads.setCompletionHook((task) => void lib.recordCompleted(task))
   vault = new Vault(() => getSettings().vaultDir)

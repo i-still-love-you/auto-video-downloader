@@ -40,6 +40,8 @@ interface Probe {
 }
 
 const SPEED_WINDOW_MS = 5000
+/** 완료·취소된 항목을 목록에 남겨 두는 최대 개수. 넘치면 오래된 것부터 뺀다 (파일과 다운로드 이력은 그대로). */
+const MAX_FINISHED = 500
 
 /**
  * 다운로드 큐/상태 관리. 이벤트: 'update'(task), 'removed'(id), 'notify'(AppNotification)
@@ -415,6 +417,26 @@ export class DownloadManager extends EventEmitter {
     this.persist()
   }
 
+  /**
+   * 완료·취소된 항목이 MAX_FINISHED 개를 넘으면 오래된 것부터 목록에서 뺀다. 목록이 수천 개로 불어나면
+   * 저장 파일이 커지고 렌더러가 갱신마다 그리는 양이 늘어난다. 파일은 남고 다운로드 이력(library)에도 그대로 있다.
+   */
+  pruneFinished(): void {
+    const finished = this.order.filter((id) => {
+      const st = this.tasks.get(id)?.status
+      return st === 'completed' || st === 'canceled'
+    })
+    if (finished.length <= MAX_FINISHED) return
+    // order 는 최신이 앞이므로 뒤쪽이 오래된 항목이다
+    for (const id of finished.slice(MAX_FINISHED)) {
+      this.tasks.delete(id)
+      this.order = this.order.filter((x) => x !== id)
+      this.logs.delete(id)
+      this.emit('removed', id)
+    }
+    this.persist()
+  }
+
   async openFile(id: string): Promise<string> {
     const t = this.tasks.get(id)
     if (!t?.filePath) return '파일이 없습니다'
@@ -526,6 +548,7 @@ export class DownloadManager extends EventEmitter {
       this.emitNow(task)
       this.persist()
       if (r?.removeAfter) await this.finalizeRemove(task, r.removeAfter.deleteFile)
+      if (task.status === 'completed' || task.status === 'canceled') this.pruneFinished()
       this.tick()
     }
   }
