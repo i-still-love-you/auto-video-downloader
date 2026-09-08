@@ -15,7 +15,7 @@ const QUALITY: Array<{ v: PreferredQuality; label: string }> = [
 ]
 
 export function SettingsPage({ active }: { active: boolean }): React.JSX.Element {
-  const { settings, saveSettings, toast } = useApp()
+  const { settings, saveSettings, reloadSettings, toast } = useApp()
   const [tools, setTools] = useState<ToolStatus[]>([])
   const [installing, setInstalling] = useState<Partial<Record<ToolName, ToolInstallProgress>>>({})
   const [version, setVersion] = useState('')
@@ -233,6 +233,27 @@ export function SettingsPage({ active }: { active: boolean }): React.JSX.Element
                   </button>
                   <span className="hint">차단은 ||도메인^ , 요소 숨김은 도메인##선택자 형식입니다. @@ 로 시작하면 예외 규칙입니다.</span>
                 </div>
+              </div>
+              <div className="field">
+                <label className="field-label">팝업 차단</label>
+                <label className="checkbox">
+                  <input type="checkbox" checked={s.popupBlock.enabled} onChange={(e) => void window.api.browser.setPopupBlockEnabled(e.target.checked).then(reloadSettings)} />
+                  사용자 동작 없는 새 창, 같은 클릭의 두 번째 창, 광고 목록에 걸리는 주소, 탭언더(클릭 하나로 현재 탭 이동 + 새 창)를 차단
+                </label>
+                {s.popupBlock.allowlist.length ? (
+                  <div className="chip-list mt-8">
+                    {s.popupBlock.allowlist.map((h) => (
+                      <span key={h} className="chip">
+                        {h}
+                        <button title="다시 차단" onClick={() => void window.api.browser.setPopupAllowed(h, false).then(reloadSettings)}>
+                          <Icon name="close" size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="hint">팝업을 허용한 사이트가 없습니다. 브라우저 방패 패널에서 사이트별로 허용할 수 있습니다.</span>
+                )}
               </div>
               <div className="field">
                 <label className="field-label">차단을 끈 사이트</label>

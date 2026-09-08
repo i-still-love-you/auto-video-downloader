@@ -691,6 +691,21 @@ a {
   align-items: flex-start;
   padding: 4px 0;
 }
+.popup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.popup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 0;
+}
+.toast .btn {
+  margin-left: 6px;
+}
 .filter-row input {
   margin-top: 3px;
 }

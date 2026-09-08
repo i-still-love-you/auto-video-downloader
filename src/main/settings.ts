@@ -1,7 +1,11 @@
 import { app } from 'electron'
 import path from 'node:path'
 import { JsonStore } from './storage/jsonStore'
-import type { AdblockSettings, Settings } from '@shared/types'
+import type { AdblockSettings, PopupBlockSettings, Settings } from '@shared/types'
+
+export function defaultPopupBlock(): PopupBlockSettings {
+  return { enabled: true, allowlist: [] }
+}
 
 export const DEFAULT_ADBLOCK_LISTS = ['adguard-base', 'adguard-tracking', 'list-kr', 'ublock-unbreak']
 
@@ -33,7 +37,8 @@ export function defaultSettings(): Settings {
     autoUpdate: true,
     detectMinSize: 200 * 1024,
     interceptBrowserDownloads: true,
-    adblock: defaultAdblock()
+    adblock: defaultAdblock(),
+    popupBlock: defaultPopupBlock()
   }
 }
 
@@ -44,6 +49,7 @@ export async function initSettings(): Promise<Settings> {
   const s = await store.load()
   // 중첩 객체는 얕은 병합이 안 되므로 기본값을 채워 넣는다
   s.adblock = { ...defaultAdblock(), ...(s.adblock ?? {}) }
+  s.popupBlock = { ...defaultPopupBlock(), ...(s.popupBlock ?? {}) }
   return s
 }
 
@@ -59,6 +65,7 @@ export function updateSettings(patch: Partial<Settings>): Settings {
   if (clean.connections !== undefined) clean.connections = Math.min(32, Math.max(1, Math.floor(clean.connections)))
   if (clean.detectMinSize !== undefined) clean.detectMinSize = Math.max(0, Math.floor(clean.detectMinSize))
   if (clean.adblock !== undefined) clean.adblock = { ...store.get().adblock, ...clean.adblock }
+  if (clean.popupBlock !== undefined) clean.popupBlock = { ...store.get().popupBlock, ...clean.popupBlock }
   return store.set(clean)
 }
 

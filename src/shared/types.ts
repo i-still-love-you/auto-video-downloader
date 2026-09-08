@@ -253,11 +253,35 @@ export interface Settings {
   detectMinSize: number
   interceptBrowserDownloads: boolean
   adblock: AdblockSettings
+  popupBlock: PopupBlockSettings
 }
 
 export interface AppNotification {
   type: 'info' | 'success' | 'error'
   message: string
+  /** 토스트에 붙는 동작 버튼 (예: 차단된 팝업 열기) */
+  action?: { label: string; url: string; tabId?: number }
+}
+
+export interface PopupBlockSettings {
+  enabled: boolean
+  allowlist: string[]
+}
+
+export type PopupBlockReason = 'no-gesture' | 'repeat' | 'filter' | 'tab-under'
+
+export interface BlockedPopup {
+  url: string
+  reason: PopupBlockReason
+  at: number
+}
+
+export interface PopupStats {
+  tabId: number
+  host: string
+  enabled: boolean
+  allowed: boolean
+  items: BlockedPopup[]
 }
 
 export type PageId = 'browser' | 'downloads' | 'files' | 'player' | 'vault' | 'settings'

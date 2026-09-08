@@ -59,7 +59,7 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
   const toast = useCallback((n: AppNotification) => {
     const id = ++toastId.current
     setToasts((prev) => [...prev.slice(-4), { ...n, id }])
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), n.type === 'error' ? 7000 : 4000)
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), n.type === 'error' ? 7000 : n.action ? 9000 : 4000)
   }, [])
 
   const dismissToast = useCallback((id: number) => setToasts((prev) => prev.filter((t) => t.id !== id)), [])

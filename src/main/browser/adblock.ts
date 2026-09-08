@@ -164,6 +164,19 @@ export class AdBlocker extends EventEmitter {
     }
   }
 
+  /** 새 창(팝업) 주소가 알려진 광고·추적 도메인인지 검사한다. 차단기가 꺼져 있으면 항상 false. */
+  testPopup(url: string, sourceUrl: string): boolean {
+    if (!this.enabled || !this.blocker) return false
+    if (this.isAllowedHost(hostOf(sourceUrl))) return false
+    try {
+      // 타입 없는 일반 규칙과 3p 규칙까지 걸리도록 'other' 로 조회한다
+      const { match } = this.blocker.match(Request.fromRawDetails({ url, sourceUrl, type: 'other' }))
+      return match
+    } catch {
+      return false
+    }
+  }
+
   /** 진단용: 주어진 요청이 차단되는지 엔진에 직접 물어본다. */
   test(url: string, type: string, sourceUrl = 'https://example.com/'): { blocked: boolean; redirect: boolean; filter?: string } {
     if (!this.blocker) return { blocked: false, redirect: false }

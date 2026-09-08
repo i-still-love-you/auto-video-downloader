@@ -89,6 +89,24 @@ export function runSmoke(win: BrowserWindow, tabs: TabManager, sniffer: Sniffer,
   // VDL_SMOKE_URL2: 3초 뒤 두 번째 탭, VDL_SMOKE_JS: 6초 뒤 렌더러에서 실행할 JS (window.api 사용 가능)
   const url2 = process.env.VDL_SMOKE_URL2
   if (url2) setTimeout(() => tabs.newTab(url2, true), 3000)
+  // VDL_SMOKE_TABCLICKS: "x,y@ms;x,y@ms" 형식으로 지정한 시각에 점검 탭에 실제 마우스 클릭을 보낸다
+  const clicks = process.env.VDL_SMOKE_TABCLICKS
+  if (clicks) {
+    for (const spec of clicks.split(';')) {
+      const m = /^(\d+),(\d+)@(\d+)$/.exec(spec.trim())
+      if (!m) continue
+      const [x, y, at] = [Number(m[1]), Number(m[2]), Number(m[3])]
+      setTimeout(() => {
+        if (smokeTabId === null || !tabs.hasTab(smokeTabId)) return
+        tabs.activate(smokeTabId)
+        const wc = tabs.activeWebContents()
+        if (!wc) return
+        wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+        wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+        consoleLines.push(`[smoke] tab click ${x},${y} @${at}`)
+      }, at)
+    }
+  }
   const js = process.env.VDL_SMOKE_JS
   if (js) {
     setTimeout(() => {
@@ -145,6 +163,7 @@ export function runSmoke(win: BrowserWindow, tabs: TabManager, sniffer: Sniffer,
       tabs: tabs.getState(),
       detected: sniffer.getDetected(),
       console: consoleLines,
+      popups: smokeTabId !== null ? tabs.popupStats(smokeTabId) : null,
       protocols: await checkProtocols(sniffer),
       thumbnails: await checkThumbnails(sniffer),
       adblock: adblock

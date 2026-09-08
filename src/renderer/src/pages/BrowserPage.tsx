@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AdblockStatus, AdblockTabStats, Bookmark, BrowserState, DetectedMedia, HistoryEntry, TabState } from '@shared/types'
+import type { AdblockStatus, AdblockTabStats, Bookmark, BrowserState, DetectedMedia, HistoryEntry, PopupStats, TabState } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/types'
 import { useApp } from '../state/AppContext'
 import { useDownloads } from '../hooks/useDownloads'
@@ -21,6 +21,8 @@ export function BrowserPage(): React.JSX.Element {
   const { settings, saveSettings, requestAnalyze, play, toast, focusAddressToken, page, setPage } = useApp()
   const [adblock, setAdblock] = useState<AdblockStatus | null>(null)
   const [tabStats, setTabStats] = useState<AdblockTabStats | null>(null)
+  const [popupStats, setPopupStats] = useState<PopupStats | null>(null)
+  const [popupTick, setPopupTick] = useState(0)
   const [quickBusy, setQuickBusy] = useState<Set<string>>(new Set())
   const tasks = useDownloads()
   const taskByUrl = useMemo(() => {
@@ -135,6 +137,25 @@ export function BrowserPage(): React.JSX.Element {
     await window.api.adblock.setAllowed(tabStats.host, !tabStats.allowed)
     setTabStats(await window.api.adblock.tabStats(active.id))
     void window.api.browser.reload(active.id)
+  }
+
+  useEffect(() => window.api.browser.onPopupBlocked(() => setPopupTick((t) => t + 1)), [])
+
+  useEffect(() => {
+    if (panel !== 'adblock' || !active) {
+      setPopupStats(null)
+      return
+    }
+    let alive = true
+    void window.api.browser.popupStats(active.id).then((s) => alive && setPopupStats(s))
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel, active?.id, active?.url, popupTick])
+
+  const refreshPopupStats = async (): Promise<void> => {
+    if (active) setPopupStats(await window.api.browser.popupStats(active.id))
   }
 
   useLayoutEffect(() => {
@@ -412,6 +433,43 @@ export function BrowserPage(): React.JSX.Element {
                   {adblock?.error && (
                     <div className="small" style={{ color: 'var(--warn)' }}>
                       {adblock.error}
+                    </div>
+                  )}
+                  <label className="switch-row" style={{ marginTop: 4 }}>
+                    <span>팝업 차단</span>
+                    <input
+                      type="checkbox"
+                      checked={popupStats?.enabled ?? true}
+                      onChange={(e) => void window.api.browser.setPopupBlockEnabled(e.target.checked).then(refreshPopupStats)}
+                    />
+                  </label>
+                  {popupStats?.host && (
+                    <div className="site-box">
+                      <label className="checkbox small">
+                        <input
+                          type="checkbox"
+                          checked={popupStats.allowed}
+                          disabled={!popupStats.enabled}
+                          onChange={(e) => void window.api.browser.setPopupAllowed(popupStats.host, e.target.checked).then(refreshPopupStats)}
+                        />
+                        {popupStats.host} 에서 팝업 허용
+                      </label>
+                      {popupStats.items.length > 0 ? (
+                        <div className="popup-list">
+                          <div className="muted small">차단된 팝업 {popupStats.items.length}개</div>
+                          {popupStats.items.map((p) => (
+                            <div key={`${p.url}-${p.at}`} className="popup-row" title={p.url}>
+                              <span className="ellipsis">{hostOf(p.url)}</span>
+                              <span className="muted small">{p.reason === 'no-gesture' ? '자동 실행' : p.reason === 'repeat' ? '중복' : p.reason === 'filter' ? '광고 목록' : '탭언더'}</span>
+                              <button className="btn sm ghost" onClick={() => void window.api.browser.openBlockedPopup(popupStats.tabId, p.url).then(refreshPopupStats)}>
+                                열기
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="muted small">이 페이지에서 차단된 팝업이 없습니다.</div>
+                      )}
                     </div>
                   )}
                   <button className="btn sm" onClick={() => setPage('settings')}>

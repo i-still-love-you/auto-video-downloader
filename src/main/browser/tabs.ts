@@ -2,9 +2,9 @@ import { EventEmitter } from 'node:events'
 import { promises as fs, writeFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { app, BrowserWindow, Menu, WebContentsView, clipboard, type Session, type WebContents } from 'electron'
-import type { BrowserState, Rect, TabState } from '@shared/types'
+import type { BlockedPopup, BrowserState, PopupBlockReason, PopupStats, Rect, TabState } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/types'
-import { getSettings } from '../settings'
+import { getSettings, updateSettings } from '../settings'
 import { addHistory, updateHistoryTitle } from '../storage/db'
 import type { Sniffer } from './sniffer'
 import type { AdBlocker } from './adblock'
@@ -33,10 +33,35 @@ interface Tab {
   blank: boolean
   /** 세션 복구로 만들어졌지만 아직 로드하지 않은 탭 (활성화될 때 로드) */
   pending: SavedTab | null
+  /** 팝업 차단용: 마지막 사용자 입력 시각, 그 입력으로 이미 연 팝업의 입력 시각, 마지막 메인 프레임 이동 시작 시각 */
+  lastInputAt: number
+  lastPopupInputAt: number
+  lastNavStartAt: number
+  blockedPopups: BlockedPopup[]
 }
 
 const MAX_CLOSED = 20
 const MAX_ENTRIES = 50
+/** 사용자 입력 뒤 이 시간 안에 열리는 새 창만 허용 (Chrome 의 일시적 사용자 활성화와 같은 5초) */
+const GESTURE_WINDOW_MS = 5000
+/** 새 창 요청 뒤 원래 탭이 이동하는지 지켜보는 시간 */
+const TAB_UNDER_PROBATION_MS = 500
+/** 새 창 요청 직전에 원래 탭이 이동을 시작했다면 같은 클릭에서 나온 것으로 본다 */
+const TAB_UNDER_LOOKBACK_MS = 400
+const MAX_BLOCKED_POPUPS = 10
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+function hostMatches(list: string[], host: string): boolean {
+  if (!host) return false
+  return list.some((d) => host === d || host.endsWith(`.${d}`))
+}
 
 export function resolveInput(input: string, engineId: string): string {
   const t = input.trim()
@@ -114,6 +139,10 @@ export class TabManager extends EventEmitter {
       view,
       blank: true,
       pending: null,
+      lastInputAt: 0,
+      lastPopupInputAt: -1,
+      lastNavStartAt: 0,
+      blockedPopups: [],
       state: { id, url: '', title: '새 탭', favicon: null, loading: false, canGoBack: false, canGoForward: false, detectedCount: 0, blockedCount: 0 }
     }
     this.tabs.set(id, tab)
@@ -311,11 +340,19 @@ export class TabManager extends EventEmitter {
         this.emitState()
       }
     })
-    wc.setWindowOpenHandler(({ url }) => {
-      if (/^https?:/i.test(url)) this.newTab(url, true, tab.id)
+    wc.setWindowOpenHandler((details) => {
+      this.handleWindowOpen(tab, details)
       return { action: 'deny' }
     })
+    wc.on('input-event', (_e, input) => {
+      const t = input.type
+      if (t === 'mouseDown' || t === 'mouseUp' || t === 'keyDown' || t === 'rawKeyDown' || t === 'keyUp') tab.lastInputAt = Date.now()
+    })
+    wc.on('did-start-navigation', (details) => {
+      if (details.isMainFrame && !details.isSameDocument) tab.lastNavStartAt = Date.now()
+    })
     wc.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown') tab.lastInputAt = Date.now()
       if (this.handleShortcut(tab, input)) event.preventDefault()
     })
     wc.on('context-menu', (_e, params) => this.showContextMenu(tab, params))
@@ -332,6 +369,84 @@ export class TabManager extends EventEmitter {
       }
     })
     wc.on('destroyed', () => this.forget(tab.id))
+  }
+
+  // ---------- 팝업 차단 ----------
+
+  /**
+   * 페이지가 새 창을 열려고 할 때. 세 겹으로 검사한다:
+   * 1) 최근 사용자 입력이 없으면 차단, 같은 입력으로 두 번째 팝업이면 차단
+   * 2) 주소가 광고 필터에 걸리면 차단
+   * 3) 잠시 기다려 원래 탭이 같은 클릭으로 이동하면(탭언더) 차단, 아니면 연다
+   */
+  private handleWindowOpen(tab: Tab, details: Electron.HandlerDetails): void {
+    const url = details.url
+    if (!/^https?:/i.test(url)) return
+    const activate = details.disposition !== 'background-tab'
+    const pb = getSettings().popupBlock
+    const pageHost = hostOf(tab.state.url)
+    if (!pb.enabled || tab.blank || hostMatches(pb.allowlist, pageHost)) {
+      this.newTab(url, activate, tab.id)
+      return
+    }
+    const now = Date.now()
+    const inputAt = tab.lastInputAt
+    if (now - inputAt > GESTURE_WINDOW_MS) return this.blockPopup(tab, url, 'no-gesture')
+    if (tab.lastPopupInputAt === inputAt) return this.blockPopup(tab, url, 'repeat')
+    if (this.adblock?.testPopup(url, tab.state.url)) return this.blockPopup(tab, url, 'filter')
+    if (now - tab.lastNavStartAt < TAB_UNDER_LOOKBACK_MS) return this.blockPopup(tab, url, 'tab-under')
+    tab.lastPopupInputAt = inputAt
+
+    const wc = tab.view.webContents
+    let navigated = false
+    const onNav = (d: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>): void => {
+      if (d.isMainFrame && !d.isSameDocument) navigated = true
+    }
+    wc.on('did-start-navigation', onNav)
+    setTimeout(() => {
+      if (!wc.isDestroyed()) wc.off('did-start-navigation', onNav)
+      if (!this.tabs.has(tab.id)) return
+      if (navigated) {
+        tab.lastPopupInputAt = -1
+        this.blockPopup(tab, url, 'tab-under')
+      } else {
+        this.newTab(url, activate, tab.id)
+      }
+    }, TAB_UNDER_PROBATION_MS)
+  }
+
+  private blockPopup(tab: Tab, url: string, reason: PopupBlockReason): void {
+    tab.blockedPopups.unshift({ url, reason, at: Date.now() })
+    if (tab.blockedPopups.length > MAX_BLOCKED_POPUPS) tab.blockedPopups.length = MAX_BLOCKED_POPUPS
+    this.emit('popupBlocked', { tabId: tab.id, url, reason, host: hostOf(url) })
+  }
+
+  popupStats(tabId: number): PopupStats {
+    const tab = this.tabs.get(tabId)
+    const host = tab ? hostOf(tab.state.url) : ''
+    const pb = getSettings().popupBlock
+    return { tabId, host, enabled: pb.enabled, allowed: hostMatches(pb.allowlist, host), items: tab ? [...tab.blockedPopups] : [] }
+  }
+
+  /** 차단된 팝업을 사용자가 직접 연다 (검사 없이). */
+  openBlockedPopup(tabId: number, url: string): void {
+    if (!/^https?:/i.test(url)) return
+    const tab = this.tabs.get(tabId)
+    if (tab) tab.blockedPopups = tab.blockedPopups.filter((p) => p.url !== url)
+    this.newTab(url, true, tab ? tabId : undefined)
+  }
+
+  setPopupAllowed(host: string, allowed: boolean): void {
+    const h = host.trim().toLowerCase().replace(/^www\./, '')
+    if (!h) return
+    const list = new Set(getSettings().popupBlock.allowlist)
+    if (allowed) list.add(h)
+    else list.delete(h)
+    updateSettings({ popupBlock: { ...getSettings().popupBlock, allowlist: [...list] } })
+  }
+
+  setPopupBlockEnabled(enabled: boolean): void {
+    updateSettings({ popupBlock: { ...getSettings().popupBlock, enabled } })
   }
 
   private handleShortcut(tab: Tab, input: Electron.Input): boolean {
