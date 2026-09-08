@@ -7,6 +7,7 @@ import { Sniffer } from './browser/sniffer'
 import { TabManager } from './browser/tabs'
 import { AdBlocker } from './browser/adblock'
 import { DownloadManager } from './downloads/manager'
+import { Library } from './downloads/library'
 import { BatchManager } from './batch/manager'
 import { cookieHeaderFor } from './downloads/net'
 import { Vault } from './vault/vault'
@@ -34,6 +35,7 @@ const CSP = [
 let win: BrowserWindow | null = null
 let tabs: TabManager | null = null
 let downloads: DownloadManager | null = null
+let library: Library | null = null
 let batch: BatchManager | null = null
 let vault: Vault | null = null
 let adblock: AdBlocker | null = null
@@ -163,6 +165,7 @@ async function createWindow(): Promise<void> {
     const firstTabs = tabs
     batch = new BatchManager({
       downloads: downloads!,
+      library: library!,
       // 탭 세션(쿠키·로그인)을 빌리고, 없으면 크롤러 전용 메모리 세션을 쓴다
       sessionFor: (tabId) => {
         const tm = tabs ?? firstTabs
@@ -173,7 +176,7 @@ async function createWindow(): Promise<void> {
     await batch.init()
   }
 
-  registerIpc({ win, tabs, sniffer, downloads: downloads!, batch, vault: vault!, adblock })
+  registerIpc({ win, tabs, sniffer, downloads: downloads!, library: library!, batch, vault: vault!, adblock })
   setupUpdater(win, getSettings().autoUpdate)
 
   if (process.env.ELECTRON_RENDERER_URL) await win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -190,6 +193,12 @@ app.whenReady().then(async () => {
   initThumbnails()
   downloads = new DownloadManager()
   await downloads.init()
+  // 다운로드 이력: 완료된 영상을 기록해 두고 중복을 판정한다. 이력이 없던 시절의 완료 목록은 한 번 옮겨 담는다.
+  library = new Library()
+  await library.init()
+  library.importTasks(downloads.list())
+  const lib = library
+  downloads.setCompletionHook((task) => void lib.recordCompleted(task))
   vault = new Vault(() => getSettings().vaultDir)
   await createWindow()
 
@@ -212,6 +221,7 @@ app.on('before-quit', (event) => {
       adblock?.destroy()
       await batch?.shutdown()
       await downloads?.shutdown()
+      await library?.flush()
       await vault?.lock()
       await flushSettings()
       await flushDb()

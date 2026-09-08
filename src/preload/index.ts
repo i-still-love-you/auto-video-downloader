@@ -27,6 +27,7 @@ import type {
   UpdateInfo,
   VaultState
 } from '@shared/types'
+import type { DownloadRecord, DuplicateMatch, DuplicateQuery } from '@shared/dedupe'
 
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, payload: T): void => cb(payload)
@@ -100,6 +101,13 @@ const api = {
     showInFolder: (id: string) => invoke<void>(IPC.downloads.showInFolder, id),
     onUpdate: (cb: (t: DownloadTask) => void) => on<DownloadTask>(IPC.downloads.evUpdate, cb),
     onRemoved: (cb: (id: string) => void) => on<string>(IPC.downloads.evRemoved, cb)
+  },
+  library: {
+    list: () => invoke<DownloadRecord[]>(IPC.library.list),
+    check: (q: DuplicateQuery) => invoke<DuplicateMatch[]>(IPC.library.check, q),
+    remove: (id: string) => invoke<void>(IPC.library.remove, id),
+    clear: () => invoke<void>(IPC.library.clear),
+    onChanged: (cb: () => void) => on<void>(IPC.library.evChanged, cb)
   },
   batch: {
     list: () => invoke<BatchJob[]>(IPC.batch.list),

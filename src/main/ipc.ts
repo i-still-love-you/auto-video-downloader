@@ -18,7 +18,9 @@ import {
 import type { TabManager } from './browser/tabs'
 import type { Sniffer } from './browser/sniffer'
 import type { DownloadManager } from './downloads/manager'
+import type { Library } from './downloads/library'
 import type { BatchManager } from './batch/manager'
+import type { DuplicateQuery } from '@shared/dedupe'
 import type { Vault } from './vault/vault'
 import type { AdBlocker } from './browser/adblock'
 import { getSettings, updateSettings } from './settings'
@@ -34,6 +36,7 @@ export interface IpcDeps {
   tabs: TabManager
   sniffer: Sniffer
   downloads: DownloadManager
+  library: Library
   batch: BatchManager
   vault: Vault
   adblock: AdBlocker
@@ -137,6 +140,13 @@ export function registerIpc(d: IpcDeps): void {
   d.downloads.on('removed', (id) => send(IPC.downloads.evRemoved, id))
   d.downloads.on('notify', (n) => notify(n))
 
+  // ---------- 다운로드 이력 / 중복 판정 ----------
+  handle(IPC.library.list, () => d.library.list())
+  handle(IPC.library.check, (_e, q: DuplicateQuery) => d.library.check(q ?? {}))
+  handle(IPC.library.remove, (_e, id: string) => d.library.remove(id))
+  handle(IPC.library.clear, () => d.library.clear())
+  d.library.on('changed', () => send(IPC.library.evChanged))
+
   // ---------- 자동(일괄) 다운로드 ----------
   handle(IPC.batch.list, () => d.batch.list())
   handle(IPC.batch.preview, (_e, url: string, tabId?: number, filter?: string) => d.batch.preview(String(url ?? ''), typeof tabId === 'number' ? tabId : undefined, typeof filter === 'string' ? filter : undefined))
@@ -186,7 +196,10 @@ export function registerIpc(d: IpcDeps): void {
     const clean = sanitizeFilename(newName)
     const ext = path.extname(p)
     const target = path.join(path.dirname(p), clean.toLowerCase().endsWith(ext.toLowerCase()) ? clean : clean + ext)
-    if (target !== p) await fs.rename(p, target)
+    if (target !== p) {
+      await fs.rename(p, target)
+      d.library.renamePath(p, target)
+    }
     return target
   })
   handle(IPC.files.mediaUrl, (_e, p: string) => mediaUrlFor(p))

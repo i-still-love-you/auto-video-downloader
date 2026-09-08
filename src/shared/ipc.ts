@@ -72,6 +72,13 @@ export const IPC = {
     evUpdate: 'batch:ev:update',
     evRemoved: 'batch:ev:removed'
   },
+  library: {
+    list: 'library:list',
+    check: 'library:check',
+    remove: 'library:remove',
+    clear: 'library:clear',
+    evChanged: 'library:ev:changed'
+  },
   files: {
     list: 'files:list',
     open: 'files:open',

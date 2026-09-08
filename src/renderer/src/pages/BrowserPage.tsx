@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AdblockStatus, AdblockTabStats, Bookmark, BrowserState, DetectedMedia, HistoryEntry, PopupStats, TabState } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/types'
+import { bestDuplicate } from '@shared/dedupe'
 import { useApp } from '../state/AppContext'
 import { useDownloads } from '../hooks/useDownloads'
+import { useLibrary } from '../hooks/useLibrary'
 import { Icon } from '../components/Icon'
 import { useConfirm } from '../components/Modal'
 import { Thumb } from '../components/Thumb'
@@ -68,6 +70,7 @@ export function BrowserPage(): React.JSX.Element {
     }
   }
   const tasks = useDownloads()
+  const library = useLibrary()
   const taskByUrl = useMemo(() => {
     const m = new Map<string, (typeof tasks)[number]>()
     for (const t of tasks) {
@@ -611,8 +614,11 @@ export function BrowserPage(): React.JSX.Element {
                 ) : (
                   sortedDetected.map((m) => {
                     const existing = taskByUrl.get(m.url)
-                    const done = existing?.status === 'completed'
-                    const inProgress = !!existing && !done && existing.status !== 'canceled' && existing.status !== 'error'
+                    // 이력(페이지·소스 주소·크기·길이)으로 이미 받은 영상인지 본다. 목록에 남은 완료 작업도 함께 본다.
+                    const dup = bestDuplicate(library, { pageUrl: m.pageUrl, url: m.url, size: m.kind === 'file' ? m.size : null, duration: m.duration, title: m.pageTitle })
+                    const done = existing?.status === 'completed' || dup?.level === 'certain'
+                    const likely = !done && dup?.level === 'likely'
+                    const inProgress = !!existing && existing.status !== 'completed' && existing.status !== 'canceled' && existing.status !== 'error'
                     const busy = quickBusy.has(m.id)
                     return (
                       <div key={m.id} className={`media-item ${done ? 'downloaded' : ''}`}>
@@ -646,8 +652,13 @@ export function BrowserPage(): React.JSX.Element {
                               )}
                             </div>
                             {done && (
-                              <div className="dl-badge done" title={existing?.filePath}>
-                                <Icon name="checkCircle" size={13} /> 다운로드됨
+                              <div className="dl-badge done" title={dup ? `${dup.reason} · ${dup.record.filePath}` : existing?.filePath}>
+                                <Icon name="checkCircle" size={13} /> {dup ? `이미 받음 · ${formatDate(dup.record.downloadedAt).slice(0, 10)}${dup.record.exists === false ? ' · 파일 없음' : ''}` : '다운로드됨'}
+                              </div>
+                            )}
+                            {likely && dup && (
+                              <div className="dl-badge likely" title={`${dup.record.title} · ${dup.record.filePath}`}>
+                                <Icon name="info" size={13} /> 이미 받은 듯 ({dup.reason})
                               </div>
                             )}
                             {inProgress && (

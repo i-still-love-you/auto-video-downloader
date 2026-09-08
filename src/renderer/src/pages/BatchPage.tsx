@@ -15,6 +15,7 @@ const DEFAULT_OPTIONS: FormOptions = {
   maxItems: 0,
   quality: 'settings',
   skipDownloaded: true,
+  skipLikely: false,
   pageDelayMs: 1500,
   filter: ''
 }
@@ -259,9 +260,13 @@ export function BatchPage({ active }: { active: boolean }): React.JSX.Element {
             </label>
           </div>
           <div className="row wrap" style={{ gap: 14 }}>
-            <label className="checkbox">
+            <label className="checkbox" title="다운로드 이력에 같은 영상 페이지나 같은 소스 주소가 있으면 건너뜁니다 (파일을 옮겼어도 이력 기준)">
               <input type="checkbox" checked={opts.skipDownloaded} onChange={(e) => setOpt('skipDownloaded', e.target.checked)} />
               이미 받은 영상은 건너뛰기
+            </label>
+            <label className="checkbox" title="크기·길이·제목이 같아 같은 영상으로 보이는 것도 건너뜁니다 (드물게 다른 영상을 건너뛸 수 있음)">
+              <input type="checkbox" checked={opts.skipLikely} disabled={!opts.skipDownloaded} onChange={(e) => setOpt('skipLikely', e.target.checked)} />
+              유력한 중복(크기·제목 일치)도 건너뛰기
             </label>
             <span className="grow" />
             <button className="btn" onClick={() => void runPreview()} disabled={previewing || !url.trim()} title="첫 페이지만 읽어 어떤 영상이 잡히는지 확인">

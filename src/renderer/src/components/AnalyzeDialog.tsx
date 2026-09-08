@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AnalyzeResult, HlsVariant, YtdlpFormat } from '@shared/types'
+import { findDuplicates } from '@shared/dedupe'
 import { useApp } from '../state/AppContext'
 import { useDownloads } from '../hooks/useDownloads'
+import { useLibrary } from '../hooks/useLibrary'
 import { Modal } from './Modal'
 import { Icon } from './Icon'
 import { Thumb } from './Thumb'
-import { errorText, formatBytes, formatDuration, hostOf } from '../lib/format'
+import { errorText, formatBytes, formatDate, formatDuration, hostOf } from '../lib/format'
 
 function variantHeight(v: HlsVariant): number {
   const m = /(\d+)x(\d+)/.exec(v.resolution ?? '')
@@ -44,10 +46,17 @@ export function AnalyzeDialog(): React.JSX.Element | null {
   const [filename, setFilename] = useState('')
   const [starting, setStarting] = useState(false)
   const tasks = useDownloads()
+  const library = useLibrary()
   const existing = useMemo(() => {
     if (!result) return undefined
-    return tasks.find((t) => t.url === result.url && t.status === 'completed') ?? tasks.find((t) => t.url === result.url && (t.status === 'running' || t.status === 'queued' || t.status === 'paused'))
+    return tasks.find((t) => t.url === result.url && (t.status === 'running' || t.status === 'queued' || t.status === 'paused'))
   }, [tasks, result])
+  /** 다운로드 이력과 대조한 중복 후보 (확실한 것이 앞) */
+  const dups = useMemo(() => {
+    if (!result) return []
+    return findDuplicates(library, { pageUrl: result.pageUrl, url: result.url, size: result.size, duration: result.duration, title: result.title }).slice(0, 3)
+  }, [library, result])
+  const certain = dups.find((d) => d.level === 'certain')
 
   useEffect(() => {
     if (!req) return
@@ -136,8 +145,8 @@ export function AnalyzeDialog(): React.JSX.Element | null {
           <button className="btn" onClick={closeAnalyze}>
             취소
           </button>
-          <button className="btn primary" disabled={!result || starting} onClick={start}>
-            <Icon name="download" size={14} /> 다운로드 시작
+          <button className={`btn ${certain ? '' : 'primary'}`} disabled={!result || starting} onClick={start}>
+            <Icon name="download" size={14} /> {certain ? '그래도 다운로드' : '다운로드 시작'}
           </button>
         </>
       }
@@ -172,9 +181,27 @@ export function AnalyzeDialog(): React.JSX.Element | null {
       {result && (
         <div className="mt-8">
           {existing && (
-            <div className={`dl-badge ${existing.status === 'completed' ? 'done' : 'progress'}`} style={{ marginBottom: 10 }}>
-              <Icon name={existing.status === 'completed' ? 'checkCircle' : 'download'} size={13} />
-              {existing.status === 'completed' ? `이미 다운로드한 항목입니다: ${existing.filePath ?? existing.title}` : '이미 다운로드 목록에 있는 항목입니다'}
+            <div className="dl-badge progress" style={{ marginBottom: 10 }}>
+              <Icon name="download" size={13} /> 이미 다운로드 목록에 있는 항목입니다
+            </div>
+          )}
+          {dups.length > 0 && (
+            <div className={`dup-box ${certain ? 'certain' : 'likely'}`}>
+              <div className="head">
+                <Icon name={certain ? 'checkCircle' : 'info'} size={14} />
+                {certain ? '이미 받은 영상입니다' : '이미 받은 영상일 수 있습니다'}
+              </div>
+              {dups.map((d) => (
+                <div key={d.record.id} className="row-line" title={d.record.filePath}>
+                  <span className="ellipsis grow">{d.record.title}</span>
+                  <span className="muted small">
+                    {d.reason} · {formatDate(d.record.downloadedAt).slice(0, 10)}
+                    {d.record.size ? ` · ${formatBytes(d.record.size)}` : ''}
+                    {d.record.duration ? ` · ${formatDuration(d.record.duration)}` : ''}
+                    {` · 파일 ${d.record.exists ? '있음' : '없음'}`}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
           <div className="analyze-head">

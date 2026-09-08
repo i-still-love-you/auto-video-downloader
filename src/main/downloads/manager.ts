@@ -54,6 +54,8 @@ export class DownloadManager extends EventEmitter {
   private resolveSession: (tabId?: number) => Session | null = () => null
   private userAgent = DEFAULT_UA
   private logs = new Map<string, string[]>()
+  /** 완료된 다운로드를 기록할 이력 저장소 (있으면) */
+  private onCompleted: ((task: DownloadTask) => void) | null = null
 
   constructor() {
     super()
@@ -64,6 +66,21 @@ export class DownloadManager extends EventEmitter {
   setSessionResolver(resolve: (tabId?: number) => Session | null, userAgent: string): void {
     this.resolveSession = resolve
     this.userAgent = userAgent
+  }
+
+  /** 다운로드가 완료될 때마다 부를 콜백 (다운로드 이력 기록) */
+  setCompletionHook(fn: (task: DownloadTask) => void): void {
+    this.onCompleted = fn
+  }
+
+  /** 직접 파일 주소의 크기·형식만 가볍게 확인한다 (Range 0-0). 실패하면 null. */
+  async probeFile(url: string, headers: Record<string, string>): Promise<{ size: number | null; mime: string; status: number } | null> {
+    try {
+      const p = await this.probe(url, headers)
+      return { size: p.size, mime: p.mime.split(';')[0].trim(), status: p.status }
+    } catch {
+      return null
+    }
   }
 
   async init(): Promise<void> {
@@ -220,11 +237,6 @@ export class DownloadManager extends EventEmitter {
 
   // ---------- 큐 ----------
 
-  /** 같은 영상 페이지(또는 같은 주소)를 이미 받은 완료 작업 */
-  findCompletedFor(url: string): DownloadTask | undefined {
-    return this.list().find((t) => t.status === 'completed' && (t.pageUrl === url || t.url === url))
-  }
-
   enqueue(req: EnqueueRequest): DownloadTask {
     const s = getSettings()
     const a = req.analyze
@@ -246,6 +258,7 @@ export class DownloadManager extends EventEmitter {
       thumbnail: a.thumbnail,
       size: a.size ?? null,
       mime: a.mime,
+      duration: a.duration && a.duration > 0 ? a.duration : undefined,
       batchId: req.batchId
     }
     if (a.kind === 'hls' && a.variants?.length) {
@@ -487,6 +500,11 @@ export class DownloadManager extends EventEmitter {
       }
       this.notify({ type: 'success', message: `다운로드 완료: ${path.basename(filePath)}` })
       void this.attachLocalThumbnail(task)
+      try {
+        this.onCompleted?.(task)
+      } catch {
+        /* 이력 기록 실패는 다운로드 결과에 영향 없음 */
+      }
     } catch (err) {
       const r = this.running.get(task.id)
       if (r?.reason === 'pause' || (isAbortError(err) && r?.reason !== 'cancel')) {

@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react'
 import type { DownloadTask } from '@shared/types'
+import type { DownloadRecord } from '@shared/dedupe'
 import { useApp } from '../state/AppContext'
 import { useDownloads } from '../hooks/useDownloads'
+import { useLibrary } from '../hooks/useLibrary'
 import { Icon } from '../components/Icon'
 import { Modal, useConfirm } from '../components/Modal'
 import { Thumb, type ThumbSource } from '../components/Thumb'
-import { errorText, fileNameOf, formatBytes, formatEta, formatSpeed, hostOf } from '../lib/format'
+import { errorText, fileNameOf, formatBytes, formatDate, formatDuration, formatEta, formatSpeed, hostOf } from '../lib/format'
 
 type Filter = 'all' | 'active' | 'done'
 
@@ -25,7 +27,9 @@ export function DownloadsPage(): React.JSX.Element {
   const [filter, setFilter] = useState<Filter>('all')
   const [logTask, setLogTask] = useState<DownloadTask | null>(null)
   const [log, setLog] = useState<string[]>([])
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [confirm, confirmDialog] = useConfirm()
+  const library = useLibrary()
 
   const visible = useMemo(() => {
     if (filter === 'active') return tasks.filter((t) => t.status === 'running' || t.status === 'queued' || t.status === 'paused')
@@ -96,8 +100,11 @@ export function DownloadsPage(): React.JSX.Element {
             </button>
           ))}
         </div>
-        <button className="btn" onClick={() => void window.api.downloads.clearFinished()} title="완료/취소된 항목을 목록에서 제거">
+        <button className="btn" onClick={() => void window.api.downloads.clearFinished()} title="완료/취소된 항목을 목록에서 제거 (다운로드 이력은 남음)">
           목록 정리
+        </button>
+        <button className="btn" onClick={() => setHistoryOpen(true)} title="받은 영상 이력. 파일을 옮겨도 남아 있어 같은 영상을 다시 받지 않게 합니다">
+          <Icon name="history" size={14} /> 이력{library.length ? ` ${library.length}` : ''}
         </button>
       </div>
       <div className="page-body">
@@ -122,8 +129,106 @@ export function DownloadsPage(): React.JSX.Element {
           <div className="log-box">{log.length ? log.join('\n') : '기록된 로그가 없습니다.'}</div>
         </Modal>
       )}
+      {historyOpen && <HistoryDialog records={library} onClose={() => setHistoryOpen(false)} confirm={confirm} />}
       {confirmDialog}
     </>
+  )
+}
+
+/** 다운로드 이력 창: 받은 영상의 페이지·크기·길이와 파일 유무를 보여 주고 삭제할 수 있다 */
+function HistoryDialog({
+  records,
+  onClose,
+  confirm
+}: {
+  records: DownloadRecord[]
+  onClose: () => void
+  confirm: (message: string, opts?: { title?: string; danger?: boolean }) => Promise<boolean>
+}): React.JSX.Element {
+  const { setPage, toast } = useApp()
+  const [query, setQuery] = useState('')
+  const list = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return records
+    return records.filter((r) => r.title.toLowerCase().includes(q) || r.host.includes(q) || (r.pageUrl ?? '').toLowerCase().includes(q) || r.filePath.toLowerCase().includes(q))
+  }, [records, query])
+  const missing = records.filter((r) => r.exists === false).length
+  const openPage = (url: string): void => {
+    void window.api.browser.newTab(url).then(() => {
+      onClose()
+      setPage('browser')
+    })
+  }
+  const clearAll = async (): Promise<void> => {
+    const ok = await confirm(`다운로드 이력 ${records.length}개를 모두 지울까요?\n지우면 같은 영상을 다시 받을 때 중복으로 알려 주지 못합니다. 파일은 지우지 않습니다.`, { danger: true, title: '이력 삭제' })
+    if (ok) {
+      await window.api.library.clear()
+      toast({ type: 'info', message: '다운로드 이력을 모두 지웠습니다' })
+    }
+  }
+  return (
+    <Modal
+      title="다운로드 이력"
+      onClose={onClose}
+      width={820}
+      footer={
+        <>
+          <span className="muted small" style={{ marginRight: 'auto' }}>
+            총 {records.length}개{missing ? ` · 파일이 제자리에 없는 항목 ${missing}개` : ''}. 파일을 옮기거나 지워도 이력은 남아 같은 영상을 다시 받지 않도록 알려 줍니다.
+          </span>
+          <button className="btn" disabled={!records.length} onClick={() => void clearAll()}>
+            <Icon name="trash" size={14} /> 전체 삭제
+          </button>
+          <button className="btn primary" onClick={onClose}>
+            닫기
+          </button>
+        </>
+      }
+    >
+      <input className="input" placeholder="제목·사이트·주소·파일 이름 검색" value={query} onChange={(e) => setQuery(e.target.value)} autoFocus />
+      <div className="history-list">
+        {list.length === 0 ? (
+          <div className="empty" style={{ padding: 30 }}>
+            {records.length === 0 ? '아직 이력이 없습니다. 다운로드가 완료되면 여기에 기록됩니다.' : '검색 결과가 없습니다.'}
+          </div>
+        ) : (
+          list.slice(0, 500).map((r) => (
+            <div key={r.id} className="history-row">
+              <Thumb source={r.thumbnail ? { kind: 'url', url: r.thumbnail } : r.exists ? { kind: 'local', path: r.filePath } : null} width={72} height={40} />
+              <div className="body">
+                <div className="t ellipsis" title={r.filePath}>
+                  {r.title}
+                </div>
+                <div className="m">
+                  <span>{r.host}</span>
+                  <span>{formatDate(r.downloadedAt)}</span>
+                  {r.size ? <span>{formatBytes(r.size)}</span> : null}
+                  {r.duration ? <span>{formatDuration(r.duration)}</span> : null}
+                  {r.resolution && <span>{r.resolution}</span>}
+                  <span className={`pill ${r.exists ? 'ok' : 'no'}`}>{r.exists ? '파일 있음' : '파일 없음'}</span>
+                </div>
+              </div>
+              <div className="actions">
+                {r.exists && (
+                  <button className="icon-btn" title="폴더에서 보기" onClick={() => void window.api.files.showInFolder(r.filePath)}>
+                    <Icon name="folder" size={16} />
+                  </button>
+                )}
+                {r.pageUrl && (
+                  <button className="icon-btn" title="영상 페이지 열기" onClick={() => openPage(r.pageUrl!)}>
+                    <Icon name="open" size={16} />
+                  </button>
+                )}
+                <button className="icon-btn" title="이력에서 삭제 (파일은 남김)" onClick={() => void window.api.library.remove(r.id)}>
+                  <Icon name="close" size={16} />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+        {list.length > 500 && <div className="muted small">외 {list.length - 500}개는 검색으로 좁혀 주세요.</div>}
+      </div>
+    </Modal>
   )
 }
 

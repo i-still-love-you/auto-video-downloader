@@ -161,6 +161,8 @@ export interface DownloadTask {
   thumbnail?: string
   size?: number | null
   mime?: string
+  /** 길이(초). 분석 결과에서 알 수 있을 때만 */
+  duration?: number
   /** 자동(일괄) 다운로드 작업에서 추가된 항목이면 그 작업 id */
   batchId?: string
 }
@@ -379,8 +381,10 @@ export interface BatchOptions {
   maxItems: number
   /** settings = 설정의 기본 화질 사용 ('매번 선택'이면 최고 화질) */
   quality: PreferredQuality | 'settings'
-  /** 이미 완료된 다운로드가 있는 영상 페이지는 건너뛰기 */
+  /** 다운로드 이력에 확실히(같은 페이지·같은 소스 주소) 있는 영상은 건너뛰기 */
   skipDownloaded: boolean
+  /** 크기·길이·제목이 같아 같은 영상으로 보이는(유력) 것도 건너뛰기 */
+  skipLikely: boolean
   /** 목록 페이지를 연달아 읽을 때 사이의 대기 시간 */
   pageDelayMs: number
   /** 제목/주소 필터 (문자열 또는 정규식, 비우면 전체) */

@@ -4,7 +4,9 @@ import path from 'node:path'
 import { JsonStore } from '../storage/jsonStore'
 import { getSettings } from '../settings'
 import type { DownloadManager } from '../downloads/manager'
+import type { Library } from '../downloads/library'
 import { cookieHeaderFor } from '../downloads/net'
+import { parseDurationText, type DuplicateMatch } from '@shared/dedupe'
 import { PageLoader } from './crawler'
 import { extractPageMedia, pickCandidate } from './extractors'
 import { errorMessage, extOfUrl, isAbortError, newId, sanitizeFilename } from '../util'
@@ -25,6 +27,8 @@ interface StoreData {
 
 export interface BatchDeps {
   downloads: DownloadManager
+  /** 다운로드 이력 (중복 판정) */
+  library: Library
   /** 탭 id 로 그 탭의 세션을, 없으면 크롤러 전용 세션을 돌려준다 */
   sessionFor: (tabId?: number) => Session
   userAgent: string
@@ -103,6 +107,7 @@ export function normalizeOptions(o: Partial<BatchOptions> | undefined): BatchOpt
     maxItems: num(o?.maxItems, 0, 0, 100_000),
     quality,
     skipDownloaded: o?.skipDownloaded !== false,
+    skipLikely: o?.skipLikely === true,
     pageDelayMs: num(o?.pageDelayMs, 1500, 0, 600_000),
     filter: typeof o?.filter === 'string' ? o.filter.trim().slice(0, 200) : '',
     tabId: typeof o?.tabId === 'number' && Number.isInteger(o.tabId) ? o.tabId : undefined
@@ -360,13 +365,11 @@ class JobRunner {
         status: 'found',
         addedAt: Date.now()
       }
-      if (job.options.skipDownloaded) {
-        const done = this.deps.downloads.findCompletedFor(it.url)
-        if (done) {
-          item.status = 'skipped'
-          item.taskId = done.id
-          item.error = '이미 받은 영상'
-        }
+      // 목록 단계에서는 페이지 주소(확실)와 같은 사이트의 같은 제목(유력)으로 중복을 본다
+      const dup = this.duplicateOf({ pageUrl: it.url, title: it.title, host: job.host, duration: parseDurationText(it.duration) })
+      if (dup) {
+        item.status = 'skipped'
+        item.error = dup
       }
       job.items.push(item)
       added++
@@ -393,6 +396,18 @@ class JobRunner {
     if (!next) job.pages.done = true
   }
 
+  /** 이력에 있으면 건너뛸 사유를 돌려준다. 옵션에 따라 확실한 중복만, 또는 유력한 중복까지 본다. */
+  private duplicateOf(q: Parameters<Library['check']>[0]): string | null {
+    const o = this.job.options
+    if (!o.skipDownloaded) return null
+    const matches = this.deps.library.check(q)
+    const pick: DuplicateMatch | undefined = matches.find((m) => m.level === 'certain') ?? (o.skipLikely ? matches.find((m) => m.level === 'likely') : undefined)
+    if (!pick) return null
+    const when = new Date(pick.record.downloadedAt)
+    const date = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`
+    return `${pick.level === 'certain' ? '이미 받은 영상' : '이미 받은 듯한 영상'} (${pick.reason}, ${date}${pick.record.exists ? '' : ', 파일 없음'})`
+  }
+
   private async resolve(item: BatchItem): Promise<void> {
     const job = this.job
     try {
@@ -401,7 +416,16 @@ class JobRunner {
         item.status = 'found'
         return
       }
-      const task = this.deps.downloads.enqueue({ analyze, quality: this.quality(), batchId: job.id })
+      // 실제 주소를 알게 된 뒤 한 번 더: 소스 주소(확실), 크기·길이(유력)
+      const dup = this.duplicateOf({ pageUrl: item.url, url: analyze.url, size: analyze.size, duration: analyze.duration, title: analyze.title, host: job.host })
+      if (dup) {
+        item.status = 'skipped'
+        item.mediaUrl = analyze.url
+        item.error = dup
+        return
+      }
+      // 수동 다운로드처럼 제목을 파일 이름으로 쓴다 (서버가 주는 해시 이름 대신)
+      const task = this.deps.downloads.enqueue({ analyze, quality: this.quality(), batchId: job.id, filename: analyze.title })
       item.taskId = task.id
       item.mediaUrl = analyze.url
       item.status = 'queued'
@@ -430,7 +454,11 @@ class JobRunner {
       const ext = extOfUrl(pick.url)
       item.extractor = media.source
       if (media.source === 'kvs' && ext !== 'm3u8' && ext !== 'mpd') {
-        return { kind: 'file', url: pick.url, title, thumbnail: media.thumbnail, headers, pageUrl: item.url }
+        // 크기만 가볍게 확인해 중복 판정에 쓴다 (실패해도 다운로드는 진행)
+        const probe = await this.deps.downloads.probeFile(pick.url, headers)
+        const size = probe && probe.status < 400 ? probe.size : null
+        const mime = probe && probe.status < 400 && /^(video|audio)\//i.test(probe.mime) ? probe.mime : undefined
+        return { kind: 'file', url: pick.url, title, thumbnail: media.thumbnail, headers, pageUrl: item.url, size, mime }
       }
       // 재생목록이나 일반 페이지에서 찾은 주소는 기존 분석기로 형식(HLS 변형 등)을 확인한다
       const r = await this.deps.downloads.analyze(pick.url, headers, item.url, title, job.options.tabId)

@@ -552,6 +552,79 @@ a {
   background: var(--pill-hi-bg);
   color: var(--pill-hi-fg);
 }
+.dl-badge.likely {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+/* ---------- 중복 안내 / 다운로드 이력 ---------- */
+.dup-box {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--ok-bg);
+}
+.dup-box.likely {
+  background: var(--warn-bg);
+}
+.dup-box .head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.dup-box.certain .head {
+  color: var(--ok-fg);
+}
+.dup-box.likely .head {
+  color: var(--warn-fg);
+}
+.dup-box .row-line {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+.history-list {
+  margin-top: 10px;
+  max-height: 60vh;
+  overflow: auto;
+}
+.history-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.history-row:last-child {
+  border-bottom: 0;
+}
+.history-row .body {
+  flex: 1;
+  min-width: 0;
+}
+.history-row .t {
+  font-size: 12px;
+}
+.history-row .m {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.history-row .actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
 .btn.quick {
   border-color: #4a4a4a;
   color: #dcdcdc;

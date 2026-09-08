@@ -239,3 +239,14 @@ export async function cacheInfo(): Promise<ThumbnailCacheInfo> {
 export async function clearCache(): Promise<void> {
   await rmrf(thumbsDir())
 }
+
+/** 로컬 파일의 길이(초). ffprobe 가 없거나 읽지 못하면 null. */
+export async function localDuration(file: string): Promise<number | null> {
+  const ffmpeg = await toolPath('ffmpeg')
+  if (!ffmpeg) return null
+  try {
+    return await probeDuration(ffmpeg, file)
+  } catch {
+    return null
+  }
+}
