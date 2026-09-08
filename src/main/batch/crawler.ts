@@ -76,6 +76,14 @@ export class PageLoader {
         else break
         result = await this.extract(wc, opts.filter)
       }
+      // 스크립트가 목록을 계속 채우는 사이트(YouTube 등)는 개수가 더 늘지 않을 때까지 기다린다
+      for (let round = 0; round < 4 && result.total > 0; round++) {
+        await this.wait(1200, opts.signal)
+        const again = await this.extract(wc, opts.filter)
+        const grew = again.total > result.total
+        if (again.total >= result.total) result = again
+        if (!grew) break
+      }
       return { ...result, httpStatus }
     } finally {
       this.busy = false

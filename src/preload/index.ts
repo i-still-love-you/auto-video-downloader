@@ -111,6 +111,7 @@ const api = {
     remove: (id: string, cancelTasks?: boolean) => invoke<void>(IPC.batch.remove, id, cancelTasks),
     retryFailed: (id: string) => invoke<void>(IPC.batch.retryFailed, id),
     retryItem: (id: string, itemId: string) => invoke<void>(IPC.batch.retryItem, id, itemId),
+    resumeItem: (id: string, itemId: string) => invoke<void>(IPC.batch.resumeItem, id, itemId),
     skipItem: (id: string, itemId: string) => invoke<void>(IPC.batch.skipItem, id, itemId),
     onUpdate: (cb: (j: BatchJob) => void) => on<BatchJob>(IPC.batch.evUpdate, cb),
     onRemoved: (cb: (id: string) => void) => on<string>(IPC.batch.evRemoved, cb)

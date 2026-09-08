@@ -146,15 +146,21 @@ interface Counts {
   resolving: number
   queued: number
   downloading: number
+  paused: number
   completed: number
   error: number
   skipped: number
 }
 
 function countItems(job: BatchJob): Counts {
-  const c: Counts = { found: 0, resolving: 0, queued: 0, downloading: 0, completed: 0, error: 0, skipped: 0 }
+  const c: Counts = { found: 0, resolving: 0, queued: 0, downloading: 0, paused: 0, completed: 0, error: 0, skipped: 0 }
   for (const it of job.items) c[it.status]++
   return c
+}
+
+/** 다운로드 작업이 아직 살아 있는(큐·진행·일시정지) 항목인지 */
+function hasLiveTask(status: BatchItem['status']): boolean {
+  return status === 'queued' || status === 'downloading' || status === 'paused'
 }
 
 /**
@@ -230,6 +236,12 @@ class JobRunner {
     const pendingWork = counts.found + counts.resolving + counts.queued + counts.downloading
 
     if (job.pages.done && !this.crawling && this.resolving === 0 && pendingWork === 0) {
+      if (counts.paused > 0) {
+        // 남은 일이 일시정지된 다운로드뿐이면 작업도 일시정지로 두고, "이어서"에서 함께 깨운다
+        this.halt('paused', `일시정지된 다운로드가 ${counts.paused}개 있습니다. "이어서"를 누르면 다시 시작합니다.`)
+        this.mgr.runnerDone(job.id)
+        return
+      }
       this.finished = true
       job.status = 'completed'
       this.loader?.destroy()
@@ -272,6 +284,7 @@ class JobRunner {
       }
     }
 
+    // 일시정지된 다운로드는 자리를 차지하지 않는다 (사용자가 멈춘 항목 때문에 나머지가 막히지 않도록)
     const windowSize = getSettings().maxConcurrent + 2
     let active = counts.queued + counts.downloading + this.resolving
     while (this.resolving < RESOLVE_PARALLEL && active < windowSize) {
@@ -464,17 +477,37 @@ export class BatchManager extends EventEmitter {
       }
       job.items = Array.isArray(job.items) ? job.items : []
       if (job.status === 'running') job.status = 'paused'
-      for (const it of job.items) {
-        if (it.status === 'resolving') it.status = 'found'
-        if ((it.status === 'queued' || it.status === 'downloading') && it.taskId) {
-          const t = this.deps.downloads.get(it.taskId)
-          if (!t) it.status = 'found'
-          else this.applyTaskStatus(it, t)
-        }
-      }
+      // 지난 실행의 탭 id 는 의미가 없다 (번호가 다시 매겨지고 세션도 메모리 전용이라 사라짐)
+      job.options.tabId = undefined
+      for (const it of job.items) if (it.status === 'resolving') it.status = 'found'
+      this.syncTasks(job, false)
       this.jobs.set(job.id, job)
       this.order.push(job.id)
     }
+  }
+
+  /**
+   * 항목에 연결된 다운로드 작업의 실제 상태를 반영한다. wake 가 true 면 일시정지된 다운로드를 다시 큐에 넣는다.
+   * 앱을 다시 켜면 다운로드 관리자가 모든 작업을 일시정지로 복구하므로, "이어서" 는 반드시 wake 로 불러야 한다.
+   */
+  private syncTasks(job: BatchJob, wake: boolean): number {
+    let woken = 0
+    for (const it of job.items) {
+      if (!hasLiveTask(it.status) || !it.taskId) continue
+      const t = this.deps.downloads.get(it.taskId)
+      if (!t) {
+        it.status = 'found'
+        it.taskId = undefined
+        continue
+      }
+      this.applyTaskStatus(it, t)
+      if (wake && t.status === 'paused') {
+        this.deps.downloads.resume(t.id)
+        it.status = 'queued'
+        woken++
+      }
+    }
+    return woken
   }
 
   list(): BatchJob[] {
@@ -526,8 +559,10 @@ export class BatchManager extends EventEmitter {
         item.status = 'downloading'
         break
       case 'queued':
-      case 'paused':
         item.status = 'queued'
+        break
+      case 'paused':
+        item.status = 'paused'
         break
       case 'completed':
         item.status = 'completed'
@@ -561,7 +596,7 @@ export class BatchManager extends EventEmitter {
     for (const job of this.jobs.values()) {
       const item = job.items.find((i) => i.taskId === id)
       if (!item) continue
-      if (item.status === 'queued' || item.status === 'downloading') {
+      if (hasLiveTask(item.status)) {
         item.status = 'skipped'
         item.error = '다운로드 목록에서 제거됨'
         this.changed(job)
@@ -604,6 +639,8 @@ export class BatchManager extends EventEmitter {
 
   private launch(job: BatchJob): void {
     if (this.runners.has(job.id)) return
+    // 이 작업이 넣어 둔 다운로드 중 일시정지된 것을 먼저 깨운다 (재시작 후 이어서 할 때 필수)
+    this.syncTasks(job, true)
     const runner = new JobRunner(job, this, this.deps)
     this.runners.set(job.id, runner)
     runner.start()
@@ -615,7 +652,7 @@ export class BatchManager extends EventEmitter {
     if (job.status === 'running') return
     if (job.status === 'completed') {
       // 완료된 작업을 다시 실행하면 실패·건너뛴 항목은 두고, 남은 목록 페이지가 있으면 이어서 읽는다
-      if (job.pages.done && !job.items.some((i) => i.status === 'found' || i.status === 'error')) return
+      if (job.pages.done && !job.items.some((i) => i.status === 'found' || i.status === 'error' || i.status === 'paused')) return
     }
     job.error = undefined
     if (!job.pages.done && !job.pages.nextUrl) job.pages.done = true
@@ -647,7 +684,7 @@ export class BatchManager extends EventEmitter {
       job.status = 'stopped'
     }
     for (const it of job.items) {
-      if ((it.status === 'queued' || it.status === 'downloading') && it.taskId) this.deps.downloads.cancel(it.taskId)
+      if (hasLiveTask(it.status) && it.taskId) this.deps.downloads.cancel(it.taskId)
     }
     this.changed(job, true)
   }
@@ -662,7 +699,7 @@ export class BatchManager extends EventEmitter {
     }
     if (cancelTasks) {
       for (const it of job.items) {
-        if ((it.status === 'queued' || it.status === 'downloading') && it.taskId) this.deps.downloads.cancel(it.taskId)
+        if (hasLiveTask(it.status) && it.taskId) this.deps.downloads.cancel(it.taskId)
       }
     }
     const t = this.emitTimers.get(id)
@@ -718,9 +755,17 @@ export class BatchManager extends EventEmitter {
       it.error = '사용자가 제외'
       this.changed(job, true)
       this.runners.get(id)?.kick()
-    } else if ((it.status === 'queued' || it.status === 'downloading') && it.taskId) {
+    } else if (hasLiveTask(it.status) && it.taskId) {
       this.deps.downloads.cancel(it.taskId)
     }
+  }
+
+  /** 일시정지된 항목 하나만 다시 받기 */
+  resumeItem(id: string, itemId: string): void {
+    const job = this.jobs.get(id)
+    const it = job?.items.find((i) => i.id === itemId)
+    if (!job || !it || it.status !== 'paused' || !it.taskId) return
+    this.deps.downloads.resume(it.taskId)
   }
 
   /** 시작 전에 첫 목록 페이지만 읽어 어떤 영상이 잡히는지 보여 준다 */

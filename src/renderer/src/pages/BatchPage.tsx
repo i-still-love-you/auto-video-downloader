@@ -41,6 +41,7 @@ const ITEM_LABEL: Record<BatchItemStatus, string> = {
   resolving: '주소 확인 중',
   queued: '큐에 추가됨',
   downloading: '다운로드 중',
+  paused: '일시정지됨',
   completed: '완료',
   error: '실패',
   skipped: '건너뜀'
@@ -71,13 +72,14 @@ interface Counts {
   resolving: number
   queued: number
   downloading: number
+  paused: number
   completed: number
   error: number
   skipped: number
 }
 
 function countOf(job: BatchJob): Counts {
-  const c: Counts = { total: job.items.length, found: 0, resolving: 0, queued: 0, downloading: 0, completed: 0, error: 0, skipped: 0 }
+  const c: Counts = { total: job.items.length, found: 0, resolving: 0, queued: 0, downloading: 0, paused: 0, completed: 0, error: 0, skipped: 0 }
   for (const it of job.items) c[it.status]++
   return c
 }
@@ -181,7 +183,7 @@ export function BatchPage({ active }: { active: boolean }): React.JSX.Element {
 
   const removeJob = async (job: BatchJob): Promise<void> => {
     const c = countOf(job)
-    const activeCount = c.queued + c.downloading
+    const activeCount = c.queued + c.downloading + c.paused
     if (activeCount > 0) {
       const ok = await confirm(`진행 중인 다운로드 ${activeCount}개를 취소하고 작업을 제거할까요?\n(취소하지 않으려면 먼저 일시정지하세요)`, { danger: true })
       if (!ok) return
@@ -358,12 +360,12 @@ function JobCard({
   const crawling = job.status === 'running' && !job.pages.done
   const barClass = job.status === 'completed' ? (c.error ? 'paused' : 'done') : job.status === 'error' ? 'error' : job.status === 'paused' || job.status === 'stopped' ? 'paused' : ''
   const items = useMemo(() => {
-    if (itemFilter === 'active') return job.items.filter((i) => i.status === 'found' || i.status === 'resolving' || i.status === 'queued' || i.status === 'downloading')
+    if (itemFilter === 'active') return job.items.filter((i) => i.status === 'found' || i.status === 'resolving' || i.status === 'queued' || i.status === 'downloading' || i.status === 'paused')
     if (itemFilter === 'error') return job.items.filter((i) => i.status === 'error')
     if (itemFilter === 'done') return job.items.filter((i) => i.status === 'completed' || i.status === 'skipped')
     return job.items
   }, [job.items, itemFilter])
-  const canResume = job.status === 'paused' || job.status === 'stopped' || job.status === 'error' || (job.status === 'completed' && (c.found > 0 || !job.pages.done))
+  const canResume = job.status === 'paused' || job.status === 'stopped' || job.status === 'error' || (job.status === 'completed' && (c.found > 0 || c.paused > 0 || !job.pages.done))
 
   return (
     <div className={`batch-job ${job.status}`}>
@@ -383,11 +385,11 @@ function JobCard({
               <Icon name="pause" />
             </button>
           ) : canResume ? (
-            <button className="icon-btn" title="이어서" onClick={() => void act(() => window.api.batch.resume(job.id))}>
+            <button className="icon-btn" title={c.paused > 0 ? `이어서 (일시정지된 다운로드 ${c.paused}개도 다시 시작)` : '이어서'} onClick={() => void act(() => window.api.batch.resume(job.id))}>
               <Icon name="play" />
             </button>
           ) : null}
-          {(job.status === 'running' || c.queued + c.downloading > 0) && (
+          {(job.status === 'running' || c.queued + c.downloading + c.paused > 0) && (
             <button className="icon-btn" title="중지 (이 작업의 진행 중 다운로드도 취소)" onClick={() => void act(() => window.api.batch.stop(job.id))}>
               <Icon name="stop" />
             </button>
@@ -419,6 +421,7 @@ function JobCard({
         <span>발견 {c.total}</span>
         <span className="ok">완료 {c.completed}</span>
         {c.downloading + c.queued + c.resolving > 0 && <span className="busy">진행 {c.downloading + c.queued + c.resolving}</span>}
+        {c.paused > 0 && <span className="warn">일시정지 {c.paused}</span>}
         {c.found > 0 && <span>대기 {c.found}</span>}
         {c.error > 0 && <span className="bad">실패 {c.error}</span>}
         {c.skipped > 0 && <span>건너뜀 {c.skipped}</span>}
@@ -437,7 +440,7 @@ function JobCard({
             <div className="seg">
               {(['all', 'active', 'error', 'done'] as const).map((f) => (
                 <button key={f} className={itemFilter === f ? 'active' : ''} onClick={() => setItemFilter(f)}>
-                  {f === 'all' ? `전체 ${c.total}` : f === 'active' ? `진행 ${c.found + c.resolving + c.queued + c.downloading}` : f === 'error' ? `실패 ${c.error}` : `완료 ${c.completed + c.skipped}`}
+                  {f === 'all' ? `전체 ${c.total}` : f === 'active' ? `진행 ${c.found + c.resolving + c.queued + c.downloading + c.paused}` : f === 'error' ? `실패 ${c.error}` : `완료 ${c.completed + c.skipped}`}
                 </button>
               ))}
             </div>
@@ -476,13 +479,18 @@ function ItemRow({ job, item: it, onOpen, act, visible }: { job: BatchJob; item:
         </div>
       </div>
       <div className="actions">
+        {it.status === 'paused' && (
+          <button className="icon-btn" title="이 다운로드 다시 시작" onClick={() => void act(() => window.api.batch.resumeItem(job.id, it.id))}>
+            <Icon name="play" size={16} />
+          </button>
+        )}
         {(it.status === 'error' || it.status === 'skipped') && (
           <button className="icon-btn" title="다시 시도" onClick={() => void act(() => window.api.batch.retryItem(job.id, it.id))}>
             <Icon name="reload" size={16} />
           </button>
         )}
-        {(it.status === 'found' || it.status === 'error' || it.status === 'queued' || it.status === 'downloading' || it.status === 'resolving') && (
-          <button className="icon-btn" title={it.status === 'queued' || it.status === 'downloading' ? '다운로드 취소하고 건너뛰기' : '건너뛰기'} onClick={() => void act(() => window.api.batch.skipItem(job.id, it.id))}>
+        {it.status !== 'completed' && it.status !== 'skipped' && (
+          <button className="icon-btn" title={it.status === 'queued' || it.status === 'downloading' || it.status === 'paused' ? '다운로드 취소하고 건너뛰기' : '건너뛰기'} onClick={() => void act(() => window.api.batch.skipItem(job.id, it.id))}>
             <Icon name="close" size={16} />
           </button>
         )}

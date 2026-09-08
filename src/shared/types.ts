@@ -346,9 +346,10 @@ export type BatchStatus = 'running' | 'paused' | 'completed' | 'stopped' | 'erro
 
 /**
  * found = 목록에서 발견, resolving = 영상 페이지에서 실제 주소 확인 중, queued = 다운로드 큐에 추가됨,
- * downloading = 받는 중, completed = 완료, error = 실패, skipped = 건너뜀(이미 받았거나 사용자가 제외)
+ * downloading = 받는 중, paused = 다운로드가 일시정지됨(앱 재시작 직후 또는 사용자가 멈춤),
+ * completed = 완료, error = 실패, skipped = 건너뜀(이미 받았거나 사용자가 제외)
  */
-export type BatchItemStatus = 'found' | 'resolving' | 'queued' | 'downloading' | 'completed' | 'error' | 'skipped'
+export type BatchItemStatus = 'found' | 'resolving' | 'queued' | 'downloading' | 'paused' | 'completed' | 'error' | 'skipped'
 
 export interface BatchItem {
   id: string

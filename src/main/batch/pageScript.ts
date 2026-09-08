@@ -141,19 +141,39 @@ export function extractListPage(opts: ListPageOptions): ListPageResult {
   }
 
   // ---------- 항목 정보 ----------
-  const cardOf = (a: Element): Element => {
+  // 카드 경계: 위로 올라가다가 "다른 영상 후보" 링크가 섞이는 조상에서 멈춘다 (채널·작성자 링크는 같은 카드로 본다)
+  const candUrls = new Set(list.map((c) => c.url))
+  const cardOf = (a: Element, url: string): Element => {
     let el: Element = a
-    for (let i = 0; i < 3 && el.parentElement; i++) {
+    for (let i = 0; i < 5 && el.parentElement; i++) {
       const p = el.parentElement
-      const links = new Set<string>()
+      if (p === document.body || p === document.documentElement) break
+      let other = false
       for (const x of Array.from(p.querySelectorAll('a[href]'))) {
         const n = norm(x.getAttribute('href'))
-        if (n) links.add(n)
+        if (n && n !== url && candUrls.has(n)) {
+          other = true
+          break
+        }
       }
-      if (links.size > 1) break
+      if (other) break
       el = p
     }
     return el
+  }
+  // 카드 안에서 가장 긴 글자 조각 (제목이 특별한 태그 없이 div/span 에 들어 있는 사이트용)
+  const longestText = (card: Element, url: string, bad: (t: string | null | undefined) => boolean): string => {
+    let best = ''
+    let n = 0
+    for (const el of Array.from(card.querySelectorAll('*'))) {
+      if (++n > 150) break
+      if (el.children.length !== 0) continue
+      const link = el.closest('a[href]')
+      if (link && norm(link.getAttribute('href')) !== url) continue
+      const t = textOf(el)
+      if (t.length > best.length && !bad(t)) best = t
+    }
+    return best
   }
   const durationIn = (card: Element): string | undefined => {
     const nodes = card.querySelectorAll('[class*="time"], [class*="dur"], [class*="length"], span, div, em, b, strong, small, p')
@@ -188,11 +208,30 @@ export function extractListPage(opts: ListPageOptions): ListPageResult {
     seen.add(c.url)
     total++
     const a = c.a
-    const card = cardOf(a)
+    const card = cardOf(a, c.url)
     const img = a.querySelector('img') || card.querySelector('img')
-    let title = a.getAttribute('title') || a.getAttribute('aria-label') || (img && img.getAttribute('alt')) || ''
-    if (!title) title = textOf(card.querySelector('.title, .name, .video-title, .thumb-title, [class*="title"], h1, h2, h3, h4, h5, h6'))
-    if (!title) title = textOf(a)
+    // 제목 후보를 순서대로 모아, 길이 표시("12:34")나 속성값("true") 같은 쓸모없는 글자는 거른다
+    const bad = (t: string | null | undefined): boolean => {
+      const s = (t || '').replace(/\s+/g, ' ').trim()
+      return s.length < 2 || DUR.test(s) || /^(true|false|null|undefined|\d+|[\d:.,\s]+)$/i.test(s)
+    }
+    const titleCands: Array<string | null | undefined> = [a.getAttribute('title'), a.getAttribute('aria-label'), img && img.getAttribute('alt')]
+    // 같은 영상을 가리키는 다른 링크(제목 링크)의 title/aria-label/글자
+    const sameLinks = Array.from(card.querySelectorAll('a[href]')).filter((x) => norm(x.getAttribute('href')) === c.url)
+    for (const x of sameLinks) titleCands.push(x.getAttribute('title'), x.getAttribute('aria-label'))
+    const titled = card.querySelector('[title]:not(a):not(img)')
+    if (titled) titleCands.push(titled.getAttribute('title'))
+    titleCands.push(textOf(card.querySelector('.title, .name, .video-title, .thumb-title, [class*="title"], [id*="title"], h1, h2, h3, h4, h5, h6')))
+    for (const x of sameLinks) titleCands.push(textOf(x))
+    titleCands.push(textOf(a))
+    let title = ''
+    for (const t of titleCands) {
+      if (!bad(t)) {
+        title = t as string
+        break
+      }
+    }
+    if (!title) title = longestText(card, c.url, bad)
     if (!title) {
       try {
         title = decodeURIComponent(pathOf(c.url).split('/').filter(Boolean).pop() || '')

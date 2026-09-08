@@ -53,14 +53,17 @@ function absolute(raw: string, base: string): string | null {
   }
 }
 
+/** 파일 이름에 'p' 없이 숫자만 붙는 경우는 흔한 해상도 값일 때만 인정한다 (영상 id 를 해상도로 오인하지 않도록) */
+const COMMON_HEIGHTS = new Set([144, 180, 240, 270, 360, 480, 540, 576, 720, 1080, 1440, 2160, 4320])
+
 export function heightFrom(text: string | undefined): number | undefined {
   if (!text) return undefined
   let m = /(\d{3,4})p\b/i.exec(text)
   if (m) return Number(m[1])
   m = /\b\d{3,4}x(\d{3,4})\b/i.exec(text)
   if (m) return Number(m[1])
-  m = /[_\-/](\d{3,4})\.(?:mp4|m3u8|webm)/i.exec(text)
-  if (m && Number(m[1]) >= 144 && Number(m[1]) <= 4320) return Number(m[1])
+  m = /[_-](\d{3,4})\.(?:mp4|m3u8|webm)/i.exec(text)
+  if (m && COMMON_HEIGHTS.has(Number(m[1]))) return Number(m[1])
   if (/\b4k\b|2160/i.test(text)) return 2160
   if (/\bhd\b/i.test(text)) return 720
   if (/\bsd\b/i.test(text)) return 480
@@ -101,16 +104,12 @@ function thumbnailFromHtml(html: string, base: string): string | undefined {
 
 // ---------- KVS ----------
 
-/** `var flashvars = { key: 'value', ... }` 를 키/값으로 읽는다. 문자열 안의 중괄호는 무시한다. */
-export function parseFlashvars(html: string): Record<string, string> | null {
-  const m = /(?:var|let|const)\s+flashvars\s*=\s*\{/.exec(html) ?? /\bflashvars\s*=\s*\{/.exec(html)
-  if (!m) return null
-  const start = m.index + m[0].length
-  let i = start
+/** `{` 바로 다음 위치(start)에서 짝이 맞는 `}` 의 위치를 찾는다. 문자열 안의 중괄호는 무시한다. */
+function closingBrace(html: string, start: number): number {
   let depth = 1
   let quote: string | null = null
   const limit = Math.min(html.length, start + 300_000)
-  for (; i < limit; i++) {
+  for (let i = start; i < limit; i++) {
     const c = html[i]
     if (quote) {
       if (c === '\\') i++
@@ -121,15 +120,46 @@ export function parseFlashvars(html: string): Record<string, string> | null {
     else if (c === '{') depth++
     else if (c === '}') {
       depth--
-      if (depth === 0) break
+      if (depth === 0) return i
     }
   }
-  const body = html.slice(start, i)
+  return -1
+}
+
+function parseObjectBody(body: string): Record<string, string> | null {
   const out: Record<string, string> = {}
   const re = /(?:^|[,{\s])['"]?([A-Za-z_][\w]*)['"]?\s*:\s*(?:'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)")/g
   let mm: RegExpExecArray | null
   while ((mm = re.exec(body))) out[mm[1]] = unescapeJs(mm[2] ?? mm[3] ?? '')
   return Object.keys(out).length ? out : null
+}
+
+/**
+ * KVS 플레이어 설정 객체를 키/값으로 읽는다. 예전 버전은 `var flashvars = {...}`, 최신 버전은 다른 변수 이름이나
+ * `kt_player(..., {...})` 인자로 넘기므로, 이름과 상관없이 `video_url:` 키를 품은 가장 가까운 객체 리터럴을 찾는다.
+ */
+export function parseFlashvars(html: string): Record<string, string> | null {
+  const named = /\bflashvars\s*=\s*\{/.exec(html)
+  if (named) {
+    const start = named.index + named[0].length
+    const end = closingBrace(html, start)
+    const parsed = end > start ? parseObjectBody(html.slice(start, end)) : null
+    if (parsed?.video_url) return parsed
+  }
+  const key = /\bvideo_url\s*:\s*['"]/.exec(html)
+  if (!key) return null
+  // video_url 앞쪽의 여는 중괄호를 가까운 순서로 보면서, 그 블록이 video_url 을 포함하는지 확인한다
+  let tries = 0
+  for (let i = key.index - 1; i >= 0 && key.index - i < 200_000 && tries < 60; i--) {
+    if (html[i] !== '{') continue
+    tries++
+    const end = closingBrace(html, i + 1)
+    if (end > key.index) {
+      const parsed = parseObjectBody(html.slice(i + 1, end))
+      if (parsed?.video_url) return parsed
+    }
+  }
+  return null
 }
 
 /** base64 로 감싼 주소면 푼다. 이미 주소 형태면 그대로. */
@@ -225,8 +255,11 @@ export function extractKvs(html: string, pageUrl: string): PageMedia | null {
 
 // ---------- 일반 페이지 ----------
 
-const MEDIA_URL_RE = /(?:https?:)?\\?\/\\?\/[^\s"'<>()\\]+?\.(?:m3u8|mpd|mp4|m4v|webm|mov|mkv)(?:\?[^\s"'<>()\\]*)?/gi
-const MEDIA_EXT_RE = /\.(m3u8|mpd|mp4|m4v|webm|mov|mkv)(?=$|[?#])/i
+// 확장자 뒤에 `/` 가 붙고 그 다음에 접근 토큰 쿼리가 오는 형태(`.../x.mp4/?token=...`)도 통째로 잡는다
+const MEDIA_URL_RE = /(?:https?:)?\\?\/\\?\/[^\s"'<>()\\]+?\.(?:m3u8|mpd|mp4|m4v|webm|mov|mkv)\/?(?:\?[^\s"'<>()\\]*)?/gi
+const MEDIA_EXT_RE = /\.(m3u8|mpd|mp4|m4v|webm|mov|mkv)\/?(?=$|[?#])/i
+/** 미리보기·트레일러 파일은 본편 후보가 따로 있으면 뒤로 미룬다 */
+const PREVIEW_RE = /preview|trailer|teaser|thumb|screenshot|sample/i
 
 function attrOf(tag: string, name: string): string | undefined {
   const m = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag)
@@ -263,7 +296,10 @@ export function extractGeneric(html: string, pageUrl: string): PageMedia | null 
     for (const u of t.matchAll(MEDIA_URL_RE)) push(u[0])
   }
   if (!cands.length) return null
-  return { source: 'generic', title: titleFromHtml(html), thumbnail: thumbnailFromHtml(html, pageUrl), candidates: dedupe(cands) }
+  let list = dedupe(cands)
+  const main = list.filter((c) => !PREVIEW_RE.test(new URL(c.url).pathname))
+  if (main.length) list = main
+  return { source: 'generic', title: titleFromHtml(html), thumbnail: thumbnailFromHtml(html, pageUrl), candidates: list }
 }
 
 function dedupe(cands: MediaCandidate[]): MediaCandidate[] {
