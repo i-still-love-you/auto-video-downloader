@@ -8,10 +8,10 @@ import { useConfirm } from '../components/Modal'
 import { Thumb } from '../components/Thumb'
 import { errorText, formatBytes, formatDate, hostOf } from '../lib/format'
 
-type Panel = 'none' | 'detected' | 'bookmarks' | 'history' | 'adblock'
+/** 사이드바 위쪽에 잠깐 펼치는 보조 패널. 감지된 동영상 목록은 항상 아래에 고정된다. */
+type Aux = 'none' | 'bookmarks' | 'history' | 'adblock'
 
-const PANEL_TITLE: Record<Exclude<Panel, 'none'>, string> = {
-  detected: '감지된 동영상',
+const PANEL_TITLE: Record<Exclude<Aux, 'none'>, string> = {
   bookmarks: '즐겨찾기',
   history: '방문 기록',
   adblock: '광고 차단'
@@ -51,7 +51,7 @@ export function BrowserPage(): React.JSX.Element {
   }
   const [state, setState] = useState<BrowserState>({ tabs: [], activeTabId: null })
   const [detected, setDetected] = useState<Record<number, DetectedMedia[]>>({})
-  const [panel, setPanel] = useState<Panel>('none')
+  const [aux, setAux] = useState<Aux>('none')
   const [address, setAddress] = useState('')
   const [editing, setEditing] = useState(false)
   const [newTabQuery, setNewTabQuery] = useState('')
@@ -109,9 +109,9 @@ export function BrowserPage(): React.JSX.Element {
   }, [focusAddressToken])
 
   useEffect(() => {
-    if (panel === 'history') loadHistory(historyQuery)
-    if (panel === 'bookmarks') loadBookmarks()
-  }, [panel, historyQuery, loadHistory, loadBookmarks])
+    if (aux === 'history') loadHistory(historyQuery)
+    if (aux === 'bookmarks') loadBookmarks()
+  }, [aux, historyQuery, loadHistory, loadBookmarks])
 
   useEffect(() => {
     void window.api.adblock.status().then(setAdblock)
@@ -119,7 +119,7 @@ export function BrowserPage(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (panel !== 'adblock' || !active) {
+    if (aux !== 'adblock' || !active) {
       setTabStats(null)
       return
     }
@@ -130,7 +130,7 @@ export function BrowserPage(): React.JSX.Element {
       alive = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panel, active?.id, active?.url, active?.blockedCount])
+  }, [aux, active?.id, active?.url, active?.blockedCount])
 
   const toggleSite = async (): Promise<void> => {
     if (!tabStats?.host || !active) return
@@ -142,7 +142,7 @@ export function BrowserPage(): React.JSX.Element {
   useEffect(() => window.api.browser.onPopupBlocked(() => setPopupTick((t) => t + 1)), [])
 
   useEffect(() => {
-    if (panel !== 'adblock' || !active) {
+    if (aux !== 'adblock' || !active) {
       setPopupStats(null)
       return
     }
@@ -152,7 +152,7 @@ export function BrowserPage(): React.JSX.Element {
       alive = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panel, active?.id, active?.url, popupTick])
+  }, [aux, active?.id, active?.url, popupTick])
 
   const refreshPopupStats = async (): Promise<void> => {
     if (active) setPopupStats(await window.api.browser.popupStats(active.id))
@@ -320,26 +320,22 @@ export function BrowserPage(): React.JSX.Element {
           <Icon name={isBookmarked ? 'star' : 'starOutline'} />
         </button>
         <button
-          className={`icon-btn ${panel === 'adblock' ? 'active' : ''}`}
-          onClick={() => setPanel(panel === 'adblock' ? 'none' : 'adblock')}
+          className={`icon-btn ${aux === 'adblock' ? 'active' : ''}`}
+          onClick={() => setAux(aux === 'adblock' ? 'none' : 'adblock')}
           title={adblock?.enabled ? '광고 차단 (켜짐)' : '광고 차단 (꺼짐)'}
           style={adblock && !adblock.enabled ? { opacity: 0.45 } : undefined}
         >
           <Icon name="shield" />
           {adblock?.enabled && (active?.blockedCount ?? 0) > 0 && <span className="dot ok">{active!.blockedCount}</span>}
         </button>
-        <button
-          className={`icon-btn ${panel === 'detected' ? 'active' : ''}`}
-          onClick={() => setPanel(panel === 'detected' ? 'none' : 'detected')}
-          title="감지된 동영상"
-        >
+        <button className={`icon-btn ${aux === 'none' ? 'active' : ''}`} onClick={() => setAux('none')} title="감지된 동영상 (사이드바에 항상 표시)">
           <Icon name="download" />
           {activeDetected.length > 0 && <span className="dot">{activeDetected.length}</span>}
         </button>
-        <button className={`icon-btn ${panel === 'bookmarks' ? 'active' : ''}`} onClick={() => setPanel(panel === 'bookmarks' ? 'none' : 'bookmarks')} title="즐겨찾기 목록">
+        <button className={`icon-btn ${aux === 'bookmarks' ? 'active' : ''}`} onClick={() => setAux(aux === 'bookmarks' ? 'none' : 'bookmarks')} title="즐겨찾기 목록">
           <Icon name="list" />
         </button>
-        <button className={`icon-btn ${panel === 'history' ? 'active' : ''}`} onClick={() => setPanel(panel === 'history' ? 'none' : 'history')} title="방문 기록">
+        <button className={`icon-btn ${aux === 'history' ? 'active' : ''}`} onClick={() => setAux(aux === 'history' ? 'none' : 'history')} title="방문 기록">
           <Icon name="history" />
         </button>
       </div>
@@ -377,16 +373,12 @@ export function BrowserPage(): React.JSX.Element {
           )}
         </div>
 
-        {panel !== 'none' && (
-          <aside className="side-panel">
+        <aside className="side-panel">
+          {aux !== 'none' && (
+            <section className="aux-panel">
             <header>
-              <span className="grow">{PANEL_TITLE[panel]}</span>
-              {panel === 'detected' && active && activeDetected.length > 0 && (
-                <button className="btn sm ghost" onClick={() => void window.api.browser.clearDetected(active.id).then(() => setDetected((p) => ({ ...p, [active.id]: [] })))}>
-                  비우기
-                </button>
-              )}
-              {panel === 'history' && history.length > 0 && (
+              <span className="grow">{PANEL_TITLE[aux]}</span>
+              {aux === 'history' && history.length > 0 && (
                 <button
                   className="btn sm ghost"
                   onClick={() =>
@@ -396,17 +388,66 @@ export function BrowserPage(): React.JSX.Element {
                   전체 삭제
                 </button>
               )}
-              <button className="icon-btn" onClick={() => setPanel('none')}>
+              <button className="icon-btn" onClick={() => setAux('none')} title="닫기">
                 <Icon name="close" size={16} />
               </button>
             </header>
-            {panel === 'history' && (
+            {aux === 'history' && (
               <div style={{ padding: '8px 8px 0' }}>
                 <input className="input" placeholder="기록 검색" value={historyQuery} onChange={(e) => setHistoryQuery(e.target.value)} />
               </div>
             )}
             <div className="list">
-              {panel === 'adblock' && (
+              {aux === 'bookmarks' &&
+                (bookmarks.length === 0 ? (
+                  <div className="empty">즐겨찾기가 없습니다. 주소창 옆 별 아이콘으로 추가하세요.</div>
+                ) : (
+                  bookmarks.map((b) => (
+                    <div key={b.id} className="list-item" onClick={() => active && void window.api.browser.navigate(active.id, b.url)}>
+                      <Icon name="star" size={14} className="muted" />
+                      <div className="title">
+                        <div>{b.title}</div>
+                        <div>{b.url}</div>
+                      </div>
+                      <button
+                        className="icon-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void window.api.bookmarks.remove(b.id).then(loadBookmarks)
+                        }}
+                        title="삭제"
+                      >
+                        <Icon name="trash" size={14} />
+                      </button>
+                    </div>
+                  ))
+                ))}
+              {aux === 'history' &&
+                (history.length === 0 ? (
+                  <div className="empty">방문 기록이 없습니다.</div>
+                ) : (
+                  history.map((h) => (
+                    <div key={h.id} className="list-item" onClick={() => active && void window.api.browser.navigate(active.id, h.url)}>
+                      <div className="title">
+                        <div>{h.title}</div>
+                        <div>
+                          {formatDate(h.visitedAt)} · {h.url}
+                        </div>
+                      </div>
+                      <button
+                        className="icon-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void window.api.history.remove(h.id).then(() => loadHistory(historyQuery))
+                        }}
+                        title="삭제"
+                      >
+                        <Icon name="close" size={14} />
+                      </button>
+                    </div>
+                  ))
+                ))}
+              {aux === 'adblock' && (
                 <div className="adblock-panel">
                   <label className="switch-row">
                     <span>광고·추적 차단</span>
@@ -477,8 +518,20 @@ export function BrowserPage(): React.JSX.Element {
                   </button>
                 </div>
               )}
-              {panel === 'detected' &&
-                (activeDetected.length === 0 ? (
+            </div>
+            </section>
+          )}
+          <section className="video-panel">
+            <header>
+              <span className="grow">감지된 동영상{activeDetected.length > 0 ? ` (${activeDetected.length})` : ''}</span>
+              {active && activeDetected.length > 0 && (
+                <button className="btn sm ghost" onClick={() => void window.api.browser.clearDetected(active.id).then(() => setDetected((p) => ({ ...p, [active.id]: [] })))}>
+                  비우기
+                </button>
+              )}
+            </header>
+            <div className="list">
+              {(activeDetected.length === 0 ? (
                   <div className="empty">
                     아직 감지된 동영상이 없습니다.
                     <br />
@@ -536,58 +589,9 @@ export function BrowserPage(): React.JSX.Element {
                     )
                   })
                 ))}
-              {panel === 'bookmarks' &&
-                (bookmarks.length === 0 ? (
-                  <div className="empty">즐겨찾기가 없습니다. 주소창 옆 별 아이콘으로 추가하세요.</div>
-                ) : (
-                  bookmarks.map((b) => (
-                    <div key={b.id} className="list-item" onClick={() => active && void window.api.browser.navigate(active.id, b.url)}>
-                      <Icon name="star" size={14} className="muted" />
-                      <div className="title">
-                        <div>{b.title}</div>
-                        <div>{b.url}</div>
-                      </div>
-                      <button
-                        className="icon-btn"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void window.api.bookmarks.remove(b.id).then(loadBookmarks)
-                        }}
-                        title="삭제"
-                      >
-                        <Icon name="trash" size={14} />
-                      </button>
-                    </div>
-                  ))
-                ))}
-              {panel === 'history' &&
-                (history.length === 0 ? (
-                  <div className="empty">방문 기록이 없습니다.</div>
-                ) : (
-                  history.map((h) => (
-                    <div key={h.id} className="list-item" onClick={() => active && void window.api.browser.navigate(active.id, h.url)}>
-                      <div className="title">
-                        <div>{h.title}</div>
-                        <div>
-                          {formatDate(h.visitedAt)} · {h.url}
-                        </div>
-                      </div>
-                      <button
-                        className="icon-btn"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void window.api.history.remove(h.id).then(() => loadHistory(historyQuery))
-                        }}
-                        title="삭제"
-                      >
-                        <Icon name="close" size={14} />
-                      </button>
-                    </div>
-                  ))
-                ))}
             </div>
-          </aside>
-        )}
+          </section>
+        </aside>
       </div>
       {confirmDialog}
     </div>

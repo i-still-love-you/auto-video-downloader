@@ -458,6 +458,21 @@ a {
   overflow: auto;
   padding: 8px;
 }
+/* 위쪽 보조 패널(즐겨찾기/기록/광고 차단)은 최대 절반까지만 차지하고, 동영상 목록은 항상 아래에 남는다 */
+.side-panel .aux-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 120px;
+  max-height: 50%;
+  border-bottom: 2px solid var(--border);
+}
+.side-panel .video-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
 
 .media-item {
   background: var(--panel);
