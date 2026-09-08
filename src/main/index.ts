@@ -5,11 +5,13 @@ import { flushSettings, getSettings, initSettings } from './settings'
 import { flushDb, initDb } from './storage/db'
 import { Sniffer } from './browser/sniffer'
 import { TabManager } from './browser/tabs'
+import { AdBlocker } from './browser/adblock'
 import { DownloadManager } from './downloads/manager'
 import { Vault } from './vault/vault'
 import { registerIpc } from './ipc'
 import { setupUpdater } from './updater'
 import { runSmoke } from './smoke'
+import { initThumbnails } from './thumbnails'
 import { ensureDir } from './util'
 import { IPC } from '@shared/ipc'
 
@@ -31,6 +33,7 @@ let win: BrowserWindow | null = null
 let tabs: TabManager | null = null
 let downloads: DownloadManager | null = null
 let vault: Vault | null = null
+let adblock: AdBlocker | null = null
 let quitting = false
 
 if (!app.requestSingleInstanceLock()) {
@@ -64,7 +67,8 @@ async function createWindow(): Promise<void> {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       sandbox: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: !process.env.VDL_SMOKE
     }
   })
   win.once('ready-to-show', () => win?.show())
@@ -90,8 +94,25 @@ async function createWindow(): Promise<void> {
     callback(['fullscreen', 'pointerLock', 'clipboard-sanitized-write'].includes(permission))
   })
 
+  // 세션당 webRequest 리스너는 이벤트마다 하나뿐이므로 광고 차단기와 감지기를 한 리스너에서 합쳐 호출한다
   const sniffer = new Sniffer(browserSession, (id) => tabs?.hasTab(id) ?? false)
-  tabs = new TabManager(win, browserSession, sniffer)
+  if (!adblock) {
+    adblock = new AdBlocker(browserSession)
+    void adblock.init()
+  }
+  const blocker = adblock
+  const filter = { urls: ['http://*/*', 'https://*/*'] }
+  browserSession.webRequest.onBeforeRequest(filter, (details, callback) => blocker.onBeforeRequest(details, callback))
+  browserSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
+    sniffer.handleBeforeSendHeaders(details)
+    callback({ requestHeaders: details.requestHeaders })
+  })
+  browserSession.webRequest.onHeadersReceived(filter, (details, callback) => {
+    sniffer.handleHeadersReceived(details)
+    blocker.onHeadersReceived(details, callback)
+  })
+
+  tabs = new TabManager(win, browserSession, sniffer, adblock)
   downloads!.setBrowserSession(browserSession)
 
   browserSession.on('will-download', (event, item, wc) => {
@@ -109,12 +130,12 @@ async function createWindow(): Promise<void> {
     win?.webContents.send(IPC.app.evNotify, { type: 'info', message: `다운로드를 추가했습니다: ${task.title}` })
   })
 
-  registerIpc({ win, tabs, sniffer, downloads: downloads!, vault: vault!, browserSession })
+  registerIpc({ win, tabs, sniffer, downloads: downloads!, vault: vault!, browserSession, adblock })
   setupUpdater(win, getSettings().autoUpdate)
 
   if (process.env.ELECTRON_RENDERER_URL) await win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else await win.loadFile(path.join(__dirname, '../renderer/index.html'))
-  runSmoke(win, tabs, sniffer)
+  runSmoke(win, tabs, sniffer, adblock)
 }
 
 app.whenReady().then(async () => {
@@ -123,6 +144,7 @@ app.whenReady().then(async () => {
   await initDb()
   await ensureDir(getSettings().downloadDir).catch(() => undefined)
   installProtocols()
+  initThumbnails()
   downloads = new DownloadManager()
   await downloads.init()
   vault = new Vault(() => getSettings().vaultDir)
@@ -143,6 +165,7 @@ app.on('before-quit', (event) => {
   event.preventDefault()
   void (async () => {
     try {
+      adblock?.destroy()
       await downloads?.shutdown()
       await vault?.lock()
       await flushSettings()

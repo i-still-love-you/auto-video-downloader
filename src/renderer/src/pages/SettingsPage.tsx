@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import type { PreferredQuality, ToolInstallProgress, ToolName, ToolStatus, UpdateInfo } from '@shared/types'
+import type { AdblockStatus, PreferredQuality, ThumbnailCacheInfo, ToolInstallProgress, ToolName, ToolStatus, UpdateInfo } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/types'
 import { useApp } from '../state/AppContext'
 import { Icon } from '../components/Icon'
-import { errorText, formatBytes } from '../lib/format'
+import { errorText, formatBytes, formatDate } from '../lib/format'
 
 const QUALITY: Array<{ v: PreferredQuality; label: string }> = [
   { v: 'ask', label: '매번 선택 (자동 시 최고 화질)' },
@@ -21,15 +21,36 @@ export function SettingsPage({ active }: { active: boolean }): React.JSX.Element
   const [version, setVersion] = useState('')
   const [update, setUpdate] = useState<UpdateInfo>({ status: 'idle' })
   const [toolPathDraft, setToolPathDraft] = useState<{ ytdlp: string; ffmpeg: string }>({ ytdlp: '', ffmpeg: '' })
+  const [thumbCache, setThumbCache] = useState<ThumbnailCacheInfo>({ count: 0, bytes: 0 })
+  const [adblock, setAdblock] = useState<AdblockStatus | null>(null)
+  const [customDraft, setCustomDraft] = useState('')
 
   const refreshTools = useCallback(async (fresh = false) => setTools(await window.api.tools.status(fresh)), [])
+  const refreshThumbCache = useCallback(async () => setThumbCache(await window.api.thumbnails.cacheInfo()), [])
 
   useEffect(() => {
     if (!active) return
     void refreshTools()
+    void refreshThumbCache()
     void window.api.app.version().then(setVersion)
     void window.api.app.updateStatus().then(setUpdate)
-  }, [active, refreshTools])
+    void window.api.adblock.status().then((s) => {
+      setAdblock(s)
+      setCustomDraft(s.customRules)
+    })
+  }, [active, refreshTools, refreshThumbCache])
+
+  useEffect(() => window.api.adblock.onStatus(setAdblock), [])
+
+  const adblockAct = async (fn: () => Promise<unknown>, success?: string): Promise<void> => {
+    try {
+      await fn()
+      setAdblock(await window.api.adblock.status())
+      if (success) toast({ type: 'success', message: success })
+    } catch (e) {
+      toast({ type: 'error', message: errorText(e) })
+    }
+  }
 
   useEffect(() => {
     if (settings) setToolPathDraft({ ytdlp: settings.toolPaths.ytdlp ?? '', ffmpeg: settings.toolPaths.ffmpeg ?? '' })
@@ -153,6 +174,88 @@ export function SettingsPage({ active }: { active: boolean }): React.JSX.Element
         </section>
 
         <section className="settings-section">
+          <h3>광고 차단</h3>
+          {!adblock ? (
+            <span className="muted small">불러오는 중...</span>
+          ) : (
+            <>
+              <label className="checkbox">
+                <input type="checkbox" checked={adblock.enabled} onChange={(e) => void adblockAct(() => window.api.adblock.setEnabled(e.target.checked))} />
+                내장 브라우저에서 광고·추적 차단 사용
+              </label>
+              <label className="checkbox mt-8">
+                <input type="checkbox" checked={adblock.doh} onChange={(e) => void adblockAct(() => window.api.adblock.setDoh(e.target.checked))} />
+                AdGuard DNS 사용 (DNS-over-HTTPS)
+              </label>
+              <span className="hint">
+                앱의 웹 요청이 dns.adguard-dns.com 으로 이름을 찾습니다. 광고·추적 도메인이 DNS 단계에서 차단됩니다. DoH 를 막는 네트워크에서는 페이지가 열리지 않으니 그때는 꺼 주세요.
+              </span>
+              <div className="field mt-16">
+                <label className="field-label">필터 목록</label>
+                {adblock.lists.map((l) => (
+                  <label key={l.id} className="checkbox filter-row">
+                    <input
+                      type="checkbox"
+                      checked={l.selected}
+                      onChange={(e) =>
+                        void adblockAct(() =>
+                          window.api.adblock.setLists(
+                            e.target.checked ? [...adblock.lists.filter((x) => x.selected).map((x) => x.id), l.id] : adblock.lists.filter((x) => x.selected && x.id !== l.id).map((x) => x.id)
+                          )
+                        )
+                      }
+                    />
+                    <span>
+                      <b>{l.name}</b>{' '}
+                      <span className="muted small">
+                        {l.description}
+                        {l.cachedAt ? ` · 받은 시각 ${formatDate(l.cachedAt)}` : ''}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="row">
+                <span className="grow muted small">
+                  {adblock.updating ? '필터를 받아서 파싱하는 중...' : adblock.updatedAt ? `마지막 갱신 ${formatDate(adblock.updatedAt)} · 규칙 ${adblock.ruleCount.toLocaleString()}개 · 24시간마다 자동 갱신` : '아직 필터가 준비되지 않았습니다'}
+                  {adblock.error && <span style={{ color: 'var(--warn)' }}> · {adblock.error}</span>}
+                </span>
+                <button className="btn" disabled={adblock.updating} onClick={() => void adblockAct(() => window.api.adblock.update(), '필터를 갱신했습니다')}>
+                  <Icon name="reload" size={14} /> 지금 업데이트
+                </button>
+              </div>
+              <div className="field mt-16">
+                <label className="field-label">사용자 규칙 (uBlock Origin / AdGuard 문법, 한 줄에 하나)</label>
+                <textarea className="input mono" rows={5} value={customDraft} onChange={(e) => setCustomDraft(e.target.value)} spellCheck={false} placeholder={'||ads.example.com^\nexample.com##.banner'} />
+                <div className="row">
+                  <button className="btn" disabled={customDraft === adblock.customRules || adblock.updating} onClick={() => void adblockAct(() => window.api.adblock.setCustomRules(customDraft), '사용자 규칙을 적용했습니다')}>
+                    적용
+                  </button>
+                  <span className="hint">차단은 ||도메인^ , 요소 숨김은 도메인##선택자 형식입니다. @@ 로 시작하면 예외 규칙입니다.</span>
+                </div>
+              </div>
+              <div className="field">
+                <label className="field-label">차단을 끈 사이트</label>
+                {adblock.allowlist.length ? (
+                  <div className="chip-list">
+                    {adblock.allowlist.map((h) => (
+                      <span key={h} className="chip">
+                        {h}
+                        <button title="다시 차단" onClick={() => void adblockAct(() => window.api.adblock.setAllowed(h, false))}>
+                          <Icon name="close" size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="muted small">없음. 브라우저 주소창 옆 방패 아이콘에서 사이트별로 끌 수 있습니다.</span>
+                )}
+              </div>
+            </>
+          )}
+        </section>
+
+        <section className="settings-section">
           <h3>개인 폴더</h3>
           <div className="field">
             <label className="field-label">암호화 파일 저장 위치</label>
@@ -203,6 +306,28 @@ export function SettingsPage({ active }: { active: boolean }): React.JSX.Element
               </button>
             </div>
             <span className="hint">비워 두면 앱 번들, 사용자 데이터 폴더, PATH 순서로 자동 검색합니다. 자동 설치는 사용자 데이터 폴더에 저장됩니다.</span>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <h3>썸네일</h3>
+          <div className="row">
+            <span className="grow muted small">
+              캐시 {thumbCache.count}개 · {formatBytes(thumbCache.bytes)}. 다운로드 파일과 감지된 동영상의 미리보기는 ffmpeg 로 만들어 사용자 데이터 폴더에 저장됩니다. ffmpeg 가 없으면
+              재생 가능한 로컬 파일에 한해 앱 안에서 프레임을 캡처합니다.
+            </span>
+            <button
+              className="btn"
+              disabled={thumbCache.count === 0}
+              onClick={() =>
+                void window.api.thumbnails.clear().then(() => {
+                  toast({ type: 'success', message: '썸네일 캐시를 비웠습니다' })
+                  return refreshThumbCache()
+                })
+              }
+            >
+              캐시 비우기
+            </button>
           </div>
         </section>
 

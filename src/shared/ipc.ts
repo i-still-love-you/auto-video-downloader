@@ -56,6 +56,24 @@ export const IPC = {
   player: {
     proxyUrl: 'player:proxyUrl'
   },
+  adblock: {
+    status: 'adblock:status',
+    setEnabled: 'adblock:setEnabled',
+    setDoh: 'adblock:setDoh',
+    setLists: 'adblock:setLists',
+    setCustomRules: 'adblock:setCustomRules',
+    setAllowed: 'adblock:setAllowed',
+    update: 'adblock:update',
+    tabStats: 'adblock:tabStats',
+    evStatus: 'adblock:ev:status'
+  },
+  thumbnails: {
+    local: 'thumbnails:local',
+    remote: 'thumbnails:remote',
+    store: 'thumbnails:store',
+    cacheInfo: 'thumbnails:cacheInfo',
+    clear: 'thumbnails:clear'
+  },
   vault: {
     state: 'vault:state',
     setup: 'vault:setup',
@@ -65,7 +83,8 @@ export const IPC = {
     remove: 'vault:remove',
     open: 'vault:open',
     export: 'vault:export',
-    changePin: 'vault:changePin'
+    changePin: 'vault:changePin',
+    thumb: 'vault:thumb'
   },
   settings: {
     get: 'settings:get',

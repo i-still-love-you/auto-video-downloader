@@ -75,6 +75,8 @@ const KEEP_REQUEST_HEADERS = ['referer', 'origin', 'user-agent', 'cookie', 'acce
 
 /**
  * 브라우저 세션의 네트워크 응답을 감시해 동영상 소스를 찾아낸다.
+ * webRequest 리스너는 세션당 하나만 허용되므로 직접 등록하지 않고, 세션 소유자가
+ * handleBeforeSendHeaders / handleHeadersReceived 를 자기 리스너 안에서 호출한다.
  * 이벤트: 'detected' (DetectedMedia), 'changed' (tabId)
  */
 export class Sniffer extends EventEmitter {
@@ -88,23 +90,18 @@ export class Sniffer extends EventEmitter {
     private readonly isTab: (id: number) => boolean
   ) {
     super()
-    this.attach()
   }
 
-  private attach(): void {
-    const filter = { urls: ['http://*/*', 'https://*/*'] }
-    this.session.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
-      this.remember(details.id, details.requestHeaders)
-      callback({ requestHeaders: details.requestHeaders })
-    })
-    this.session.webRequest.onHeadersReceived(filter, (details, callback) => {
-      callback({ responseHeaders: details.responseHeaders })
-      try {
-        this.inspect(details)
-      } catch {
-        /* 감지 실패는 무시 */
-      }
-    })
+  handleBeforeSendHeaders(details: Electron.OnBeforeSendHeadersListenerDetails): void {
+    this.remember(details.id, details.requestHeaders)
+  }
+
+  handleHeadersReceived(details: OnHeadersReceivedListenerDetails): void {
+    try {
+      this.inspect(details)
+    } catch {
+      /* 감지 실패는 무시 */
+    }
   }
 
   private remember(id: number, headers: Record<string, string>): void {

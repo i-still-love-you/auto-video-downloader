@@ -3,6 +3,7 @@ import type { VaultState } from '@shared/types'
 import { useApp } from '../state/AppContext'
 import { Icon } from '../components/Icon'
 import { Modal, useConfirm } from '../components/Modal'
+import { Thumb } from '../components/Thumb'
 import { errorText, formatBytes, formatDate } from '../lib/format'
 
 export function VaultPage({ active }: { active: boolean }): React.JSX.Element {
@@ -149,7 +150,7 @@ export function VaultPage({ active }: { active: boolean }): React.JSX.Element {
                 <tr key={it.id} onDoubleClick={() => void playItem(it.id, it.name)}>
                   <td>
                     <div className="name row">
-                      <Icon name="film" size={16} className="muted" />
+                      <Thumb source={{ kind: 'vault', id: it.id, hasThumb: it.hasThumb }} width={80} height={45} iconSize={18} />
                       <span className="ellipsis">{it.name}</span>
                     </div>
                   </td>

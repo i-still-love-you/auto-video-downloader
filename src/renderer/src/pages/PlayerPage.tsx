@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import Hls from 'hls.js'
 import { useApp } from '../state/AppContext'
 import { Icon } from '../components/Icon'
+import { Thumb } from '../components/Thumb'
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3]
 
@@ -148,7 +149,7 @@ export function PlayerPage({ active }: { active: boolean }): React.JSX.Element {
           ) : (
             playerQueue.map((q, i) => (
               <div key={q.id} className={`list-item ${i === playerIndex ? 'active' : ''}`} onClick={() => setPlayerIndex(i)}>
-                <Icon name={i === playerIndex ? 'play' : 'film'} size={14} className="muted" />
+                <Thumb source={q.path ? { kind: 'local', path: q.path } : null} width={64} height={36} icon={i === playerIndex ? 'play' : 'film'} iconSize={16} />
                 <div className="title">
                   <div>{q.title}</div>
                   <div>{q.kind === 'local' ? '로컬 파일' : q.kind === 'hls' ? 'HLS 스트림' : '원격 파일'}</div>

@@ -1,7 +1,13 @@
 import { app } from 'electron'
 import path from 'node:path'
 import { JsonStore } from './storage/jsonStore'
-import type { Settings } from '@shared/types'
+import type { AdblockSettings, Settings } from '@shared/types'
+
+export const DEFAULT_ADBLOCK_LISTS = ['adguard-base', 'adguard-tracking', 'list-kr', 'ublock-unbreak']
+
+export function defaultAdblock(): AdblockSettings {
+  return { enabled: true, lists: [...DEFAULT_ADBLOCK_LISTS], customRules: '', allowlist: [], doh: false }
+}
 
 function safePath(name: Parameters<typeof app.getPath>[0], fallback: string): string {
   try {
@@ -26,7 +32,8 @@ export function defaultSettings(): Settings {
     toolPaths: {},
     autoUpdate: true,
     detectMinSize: 200 * 1024,
-    interceptBrowserDownloads: true
+    interceptBrowserDownloads: true,
+    adblock: defaultAdblock()
   }
 }
 
@@ -34,7 +41,10 @@ let store: JsonStore<Settings> | null = null
 
 export async function initSettings(): Promise<Settings> {
   store = new JsonStore<Settings>(path.join(app.getPath('userData'), 'settings.json'), defaultSettings)
-  return store.load()
+  const s = await store.load()
+  // 중첩 객체는 얕은 병합이 안 되므로 기본값을 채워 넣는다
+  s.adblock = { ...defaultAdblock(), ...(s.adblock ?? {}) }
+  return s
 }
 
 export function getSettings(): Settings {
@@ -48,6 +58,7 @@ export function updateSettings(patch: Partial<Settings>): Settings {
   if (clean.maxConcurrent !== undefined) clean.maxConcurrent = Math.min(10, Math.max(1, Math.floor(clean.maxConcurrent)))
   if (clean.connections !== undefined) clean.connections = Math.min(32, Math.max(1, Math.floor(clean.connections)))
   if (clean.detectMinSize !== undefined) clean.detectMinSize = Math.max(0, Math.floor(clean.detectMinSize))
+  if (clean.adblock !== undefined) clean.adblock = { ...store.get().adblock, ...clean.adblock }
   return store.set(clean)
 }
 

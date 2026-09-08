@@ -17,11 +17,13 @@ import type { TabManager } from './browser/tabs'
 import type { Sniffer } from './browser/sniffer'
 import type { DownloadManager } from './downloads/manager'
 import type { Vault } from './vault/vault'
+import type { AdBlocker } from './browser/adblock'
 import { getSettings, updateSettings } from './settings'
 import * as db from './storage/db'
 import { installTool, invalidateToolCache, toolsStatus } from './tools/binaries'
 import { mediaUrlFor, proxyUrlFor } from './protocols'
 import { checkUpdate, installUpdate, updateStatus } from './updater'
+import { cacheInfo, clearCache, localThumbnail, remoteThumbnail, storeThumbnail } from './thumbnails'
 import { ensureDir, isMediaExt, sanitizeFilename } from './util'
 
 export interface IpcDeps {
@@ -31,6 +33,7 @@ export interface IpcDeps {
   downloads: DownloadManager
   vault: Vault
   browserSession: Session
+  adblock: AdBlocker
 }
 
 export function registerIpc(d: IpcDeps): void {
@@ -152,6 +155,24 @@ export function registerIpc(d: IpcDeps): void {
   // ---------- 플레이어 ----------
   handle(IPC.player.proxyUrl, (_e, url: string, headers?: Record<string, string>) => proxyUrlFor(url, headers))
 
+  // ---------- 광고 차단 ----------
+  handle(IPC.adblock.status, () => d.adblock.status())
+  handle(IPC.adblock.setEnabled, (_e, enabled: boolean) => d.adblock.setEnabled(!!enabled))
+  handle(IPC.adblock.setDoh, (_e, doh: boolean) => d.adblock.setDoh(!!doh))
+  handle(IPC.adblock.setLists, (_e, ids: string[]) => d.adblock.setLists(Array.isArray(ids) ? ids : []))
+  handle(IPC.adblock.setCustomRules, (_e, text: string) => d.adblock.setCustomRules(String(text ?? '')))
+  handle(IPC.adblock.setAllowed, (_e, host: string, allowed: boolean) => d.adblock.setAllowed(host, !!allowed))
+  handle(IPC.adblock.update, () => d.adblock.update())
+  handle(IPC.adblock.tabStats, (_e, tabId: number) => d.adblock.tabStats(tabId))
+  d.adblock.on('status', (s) => send(IPC.adblock.evStatus, s))
+
+  // ---------- 썸네일 ----------
+  handle(IPC.thumbnails.local, (_e, p: string) => localThumbnail(p))
+  handle(IPC.thumbnails.remote, (_e, url: string, headers?: Record<string, string>) => remoteThumbnail(url, headers))
+  handle(IPC.thumbnails.store, (_e, p: string, dataUrl: string) => storeThumbnail(p, dataUrl))
+  handle(IPC.thumbnails.cacheInfo, () => cacheInfo())
+  handle(IPC.thumbnails.clear, () => clearCache())
+
   // ---------- 개인 폴더 ----------
   handle(IPC.vault.state, () => d.vault.state())
   handle(IPC.vault.setup, (_e, pin: string) => d.vault.setup(pin))
@@ -166,6 +187,7 @@ export function registerIpc(d: IpcDeps): void {
     return d.vault.export(id, r.filePaths[0])
   })
   handle(IPC.vault.changePin, (_e, oldPin: string, newPin: string) => d.vault.changePin(oldPin, newPin))
+  handle(IPC.vault.thumb, (_e, id: string) => d.vault.thumb(id))
 
   // ---------- 설정 ----------
   handle(IPC.settings.get, () => getSettings())

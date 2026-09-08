@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC } from '@shared/ipc'
 import type {
+  AdblockStatus,
+  AdblockTabStats,
   AnalyzeResult,
   AppNotification,
   Bookmark,
@@ -13,6 +15,8 @@ import type {
   NavigateEvent,
   Rect,
   Settings,
+  ThumbnailCacheInfo,
+  ThumbnailResult,
   ToolInstallProgress,
   ToolName,
   ToolStatus,
@@ -91,6 +95,24 @@ const api = {
   player: {
     proxyUrl: (url: string, headers?: Record<string, string>) => invoke<string>(IPC.player.proxyUrl, url, headers)
   },
+  adblock: {
+    status: () => invoke<AdblockStatus>(IPC.adblock.status),
+    setEnabled: (enabled: boolean) => invoke<void>(IPC.adblock.setEnabled, enabled),
+    setDoh: (doh: boolean) => invoke<void>(IPC.adblock.setDoh, doh),
+    setLists: (ids: string[]) => invoke<void>(IPC.adblock.setLists, ids),
+    setCustomRules: (text: string) => invoke<void>(IPC.adblock.setCustomRules, text),
+    setAllowed: (host: string, allowed: boolean) => invoke<void>(IPC.adblock.setAllowed, host, allowed),
+    update: () => invoke<void>(IPC.adblock.update),
+    tabStats: (tabId: number) => invoke<AdblockTabStats>(IPC.adblock.tabStats, tabId),
+    onStatus: (cb: (s: AdblockStatus) => void) => on<AdblockStatus>(IPC.adblock.evStatus, cb)
+  },
+  thumbnails: {
+    local: (p: string) => invoke<ThumbnailResult>(IPC.thumbnails.local, p),
+    remote: (url: string, headers?: Record<string, string>) => invoke<string | null>(IPC.thumbnails.remote, url, headers),
+    store: (p: string, dataUrl: string) => invoke<string>(IPC.thumbnails.store, p, dataUrl),
+    cacheInfo: () => invoke<ThumbnailCacheInfo>(IPC.thumbnails.cacheInfo),
+    clear: () => invoke<void>(IPC.thumbnails.clear)
+  },
   vault: {
     state: () => invoke<VaultState>(IPC.vault.state),
     setup: (pin: string) => invoke<VaultState>(IPC.vault.setup, pin),
@@ -100,7 +122,8 @@ const api = {
     remove: (id: string) => invoke<VaultState>(IPC.vault.remove, id),
     open: (id: string) => invoke<string>(IPC.vault.open, id),
     export: (id: string) => invoke<string | null>(IPC.vault.export, id),
-    changePin: (oldPin: string, newPin: string) => invoke<void>(IPC.vault.changePin, oldPin, newPin)
+    changePin: (oldPin: string, newPin: string) => invoke<void>(IPC.vault.changePin, oldPin, newPin),
+    thumb: (id: string) => invoke<string | null>(IPC.vault.thumb, id)
   },
   settings: {
     get: () => invoke<Settings>(IPC.settings.get),

@@ -1,15 +1,25 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { Bookmark, BrowserState, DetectedMedia, HistoryEntry, TabState } from '@shared/types'
+import type { AdblockStatus, AdblockTabStats, Bookmark, BrowserState, DetectedMedia, HistoryEntry, TabState } from '@shared/types'
 import { SEARCH_ENGINES } from '@shared/types'
 import { useApp } from '../state/AppContext'
 import { Icon } from '../components/Icon'
 import { useConfirm } from '../components/Modal'
+import { Thumb } from '../components/Thumb'
 import { errorText, formatBytes, formatDate, hostOf } from '../lib/format'
 
-type Panel = 'none' | 'detected' | 'bookmarks' | 'history'
+type Panel = 'none' | 'detected' | 'bookmarks' | 'history' | 'adblock'
+
+const PANEL_TITLE: Record<Exclude<Panel, 'none'>, string> = {
+  detected: '감지된 동영상',
+  bookmarks: '즐겨찾기',
+  history: '방문 기록',
+  adblock: '광고 차단'
+}
 
 export function BrowserPage(): React.JSX.Element {
-  const { settings, saveSettings, requestAnalyze, play, toast, focusAddressToken, page } = useApp()
+  const { settings, saveSettings, requestAnalyze, play, toast, focusAddressToken, page, setPage } = useApp()
+  const [adblock, setAdblock] = useState<AdblockStatus | null>(null)
+  const [tabStats, setTabStats] = useState<AdblockTabStats | null>(null)
   const [state, setState] = useState<BrowserState>({ tabs: [], activeTabId: null })
   const [detected, setDetected] = useState<Record<number, DetectedMedia[]>>({})
   const [panel, setPanel] = useState<Panel>('none')
@@ -73,6 +83,32 @@ export function BrowserPage(): React.JSX.Element {
     if (panel === 'history') loadHistory(historyQuery)
     if (panel === 'bookmarks') loadBookmarks()
   }, [panel, historyQuery, loadHistory, loadBookmarks])
+
+  useEffect(() => {
+    void window.api.adblock.status().then(setAdblock)
+    return window.api.adblock.onStatus(setAdblock)
+  }, [])
+
+  useEffect(() => {
+    if (panel !== 'adblock' || !active) {
+      setTabStats(null)
+      return
+    }
+    let alive = true
+    void window.api.adblock.tabStats(active.id).then((s) => alive && setTabStats(s))
+    void window.api.adblock.status().then((s) => alive && setAdblock(s))
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel, active?.id, active?.url, active?.blockedCount])
+
+  const toggleSite = async (): Promise<void> => {
+    if (!tabStats?.host || !active) return
+    await window.api.adblock.setAllowed(tabStats.host, !tabStats.allowed)
+    setTabStats(await window.api.adblock.tabStats(active.id))
+    void window.api.browser.reload(active.id)
+  }
 
   useLayoutEffect(() => {
     const el = contentRef.current
@@ -226,6 +262,15 @@ export function BrowserPage(): React.JSX.Element {
           <Icon name={isBookmarked ? 'star' : 'starOutline'} />
         </button>
         <button
+          className={`icon-btn ${panel === 'adblock' ? 'active' : ''}`}
+          onClick={() => setPanel(panel === 'adblock' ? 'none' : 'adblock')}
+          title={adblock?.enabled ? '광고 차단 (켜짐)' : '광고 차단 (꺼짐)'}
+          style={adblock && !adblock.enabled ? { opacity: 0.45 } : undefined}
+        >
+          <Icon name="shield" />
+          {adblock?.enabled && (active?.blockedCount ?? 0) > 0 && <span className="dot ok">{active!.blockedCount}</span>}
+        </button>
+        <button
           className={`icon-btn ${panel === 'detected' ? 'active' : ''}`}
           onClick={() => setPanel(panel === 'detected' ? 'none' : 'detected')}
           title="감지된 동영상"
@@ -277,7 +322,7 @@ export function BrowserPage(): React.JSX.Element {
         {panel !== 'none' && (
           <aside className="side-panel">
             <header>
-              <span className="grow">{panel === 'detected' ? '감지된 동영상' : panel === 'bookmarks' ? '즐겨찾기' : '방문 기록'}</span>
+              <span className="grow">{PANEL_TITLE[panel]}</span>
               {panel === 'detected' && active && activeDetected.length > 0 && (
                 <button className="btn sm ghost" onClick={() => void window.api.browser.clearDetected(active.id).then(() => setDetected((p) => ({ ...p, [active.id]: [] })))}>
                   비우기
@@ -303,6 +348,40 @@ export function BrowserPage(): React.JSX.Element {
               </div>
             )}
             <div className="list">
+              {panel === 'adblock' && (
+                <div className="adblock-panel">
+                  <label className="switch-row">
+                    <span>광고·추적 차단</span>
+                    <input type="checkbox" checked={adblock?.enabled ?? false} onChange={(e) => void window.api.adblock.setEnabled(e.target.checked)} />
+                  </label>
+                  {tabStats?.host ? (
+                    <div className="site-box">
+                      <div className="host">{tabStats.host}</div>
+                      <div className="muted small">
+                        {!adblock?.enabled ? '차단이 전체적으로 꺼져 있습니다' : tabStats.allowed ? '이 사이트에서는 차단이 꺼져 있습니다' : `이 페이지에서 ${tabStats.blocked}개 차단`}
+                      </div>
+                      <button className={`btn sm ${tabStats.allowed ? 'primary' : ''}`} onClick={() => void toggleSite()} disabled={!adblock?.enabled}>
+                        {tabStats.allowed ? '이 사이트에서 켜기' : '이 사이트에서 끄기'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="muted small">페이지를 열면 사이트별로 차단을 켜고 끌 수 있습니다.</div>
+                  )}
+                  <div className="muted small">
+                    총 차단 {adblock?.totalBlocked ?? 0}개 · 규칙 {(adblock?.ruleCount ?? 0).toLocaleString()}개
+                    <br />
+                    {adblock?.updating ? '필터 업데이트 중...' : adblock?.updatedAt ? `필터 업데이트 ${formatDate(adblock.updatedAt)}` : adblock?.ready ? '' : '필터 준비 중...'}
+                  </div>
+                  {adblock?.error && (
+                    <div className="small" style={{ color: 'var(--warn)' }}>
+                      {adblock.error}
+                    </div>
+                  )}
+                  <button className="btn sm" onClick={() => setPage('settings')}>
+                    <Icon name="settings" size={13} /> 필터 목록·사용자 규칙 관리
+                  </button>
+                </div>
+              )}
               {panel === 'detected' &&
                 (activeDetected.length === 0 ? (
                   <div className="empty">
@@ -313,13 +392,18 @@ export function BrowserPage(): React.JSX.Element {
                 ) : (
                   [...activeDetected].reverse().map((m) => (
                     <div key={m.id} className="media-item">
-                      <div className="name">
-                        <span className={`kind ${m.kind}`}>{m.kind === 'file' ? (m.mime.split('/')[1] ?? 'file') : m.kind}</span>
-                        {m.filename || m.pageTitle || hostOf(m.url)}
-                      </div>
-                      <div className="meta">
-                        {m.size ? `${formatBytes(m.size)} · ` : ''}
-                        {hostOf(m.url)}
+                      <div className="head">
+                        <Thumb source={m.kind === 'dash' ? null : { kind: 'remote', url: m.url, headers: m.headers }} width={96} height={54} />
+                        <div>
+                          <div className="name">
+                            <span className={`kind ${m.kind}`}>{m.kind === 'file' ? (m.mime.split('/')[1] ?? 'file') : m.kind}</span>
+                            {m.filename || m.pageTitle || hostOf(m.url)}
+                          </div>
+                          <div className="meta">
+                            {m.size ? `${formatBytes(m.size)} · ` : ''}
+                            {hostOf(m.url)}
+                          </div>
+                        </div>
                       </div>
                       <div className="actions">
                         <button className="btn sm primary" onClick={() => requestAnalyze({ url: m.url, headers: m.headers, pageUrl: m.pageUrl, pageTitle: m.pageTitle, item: m })}>

@@ -5,6 +5,7 @@ import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
 import type { VaultItem, VaultState } from '@shared/types'
 import { ensureDir, newId, rmrf, sanitizeFilename, uniquePath } from '../util'
+import { thumbnailBuffer } from '../thumbnails'
 
 interface Meta {
   version: 1
@@ -142,6 +143,10 @@ export class Vault {
     return path.join(this.getDir(), `${id}.enc`)
   }
 
+  private thumbPath(id: string): string {
+    return path.join(this.getDir(), `${id}.thumb.enc`)
+  }
+
   async add(paths: string[]): Promise<VaultState> {
     const key = this.requireKey()
     await ensureDir(this.getDir())
@@ -150,13 +155,17 @@ export class Vault {
       if (!st.isFile()) continue
       const id = newId()
       const dest = this.encPath(id)
+      // 원본이 삭제되기 전에 썸네일을 만들어 함께 암호화한다 (평문 썸네일은 디스크에 남기지 않음)
+      const thumb = await thumbnailBuffer(src).catch(() => null)
       await this.encryptFile(src, dest, key)
+      if (thumb) await fs.writeFile(this.thumbPath(id), Vault.encryptBuffer(thumb, key))
       this.meta!.items.push({
         id,
         name: path.basename(src),
         size: st.size,
         addedAt: Date.now(),
-        ext: path.extname(src).slice(1).toLowerCase()
+        ext: path.extname(src).slice(1).toLowerCase(),
+        hasThumb: !!thumb
       })
       await this.saveMeta()
       await fs.rm(src, { force: true }).catch(() => undefined)
@@ -167,10 +176,39 @@ export class Vault {
   async remove(id: string): Promise<VaultState> {
     this.requireKey()
     await fs.rm(this.encPath(id), { force: true }).catch(() => undefined)
+    await fs.rm(this.thumbPath(id), { force: true }).catch(() => undefined)
     this.meta!.items = this.meta!.items.filter((i) => i.id !== id)
     await this.saveMeta()
     await fs.rm(this.tempPathFor(id), { force: true }).catch(() => undefined)
     return this.state()
+  }
+
+  /** 암호화된 썸네일을 메모리에서 복호화해 data URL 로 돌려준다. */
+  async thumb(id: string): Promise<string | null> {
+    const key = this.requireKey()
+    try {
+      const buf = await fs.readFile(this.thumbPath(id))
+      return `data:image/jpeg;base64,${Vault.decryptBuffer(buf, key).toString('base64')}`
+    } catch {
+      return null
+    }
+  }
+
+  private static encryptBuffer(data: Buffer, key: Buffer): Buffer {
+    const iv = crypto.randomBytes(12)
+    const c = crypto.createCipheriv('aes-256-gcm', key, iv)
+    const body = Buffer.concat([c.update(data), c.final()])
+    return Buffer.concat([MAGIC, iv, body, c.getAuthTag()])
+  }
+
+  private static decryptBuffer(buf: Buffer, key: Buffer): Buffer {
+    if (buf.length < HEADER_LEN + TAG_LEN || !buf.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error('손상된 파일입니다')
+    const iv = buf.subarray(MAGIC.length, HEADER_LEN)
+    const tag = buf.subarray(buf.length - TAG_LEN)
+    const body = buf.subarray(HEADER_LEN, buf.length - TAG_LEN)
+    const d = crypto.createDecipheriv('aes-256-gcm', key, iv)
+    d.setAuthTag(tag)
+    return Buffer.concat([d.update(body), d.final()])
   }
 
   private tempPathFor(id: string): string {

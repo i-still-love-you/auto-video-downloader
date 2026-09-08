@@ -25,6 +25,7 @@ export interface TabState {
   canGoBack: boolean
   canGoForward: boolean
   detectedCount: number
+  blockedCount: number
 }
 
 export interface BrowserState {
@@ -161,6 +162,18 @@ export interface VaultItem {
   size: number
   addedAt: number
   ext: string
+  hasThumb?: boolean
+}
+
+export interface ThumbnailResult {
+  url: string | null
+  /** ffmpeg 가 없어 렌더러의 canvas 캡처로 대체할 수 있는 경우 */
+  canFallback: boolean
+}
+
+export interface ThumbnailCacheInfo {
+  count: number
+  bytes: number
 }
 
 export interface VaultState {
@@ -187,6 +200,43 @@ export interface ToolInstallProgress {
   message?: string
 }
 
+export interface AdblockSettings {
+  enabled: boolean
+  lists: string[]
+  customRules: string
+  allowlist: string[]
+  doh: boolean
+}
+
+export interface AdblockListInfo {
+  id: string
+  name: string
+  description: string
+  selected: boolean
+  cachedAt: number | null
+}
+
+export interface AdblockStatus {
+  enabled: boolean
+  doh: boolean
+  ready: boolean
+  updating: boolean
+  updatedAt: number
+  error: string | null
+  lists: AdblockListInfo[]
+  customRules: string
+  allowlist: string[]
+  totalBlocked: number
+  ruleCount: number
+}
+
+export interface AdblockTabStats {
+  tabId: number
+  host: string
+  blocked: number
+  allowed: boolean
+}
+
 export type PreferredQuality = 'ask' | 'best' | '1080' | '720' | '480' | 'worst'
 
 export interface Settings {
@@ -202,6 +252,7 @@ export interface Settings {
   autoUpdate: boolean
   detectMinSize: number
   interceptBrowserDownloads: boolean
+  adblock: AdblockSettings
 }
 
 export interface AppNotification {

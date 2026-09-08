@@ -466,6 +466,15 @@ a {
   padding: 8px 10px;
   margin-bottom: 8px;
 }
+.media-item .head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.media-item .head > div:last-child {
+  flex: 1;
+  min-width: 0;
+}
 .media-item .name {
   font-weight: 500;
   word-break: break-all;
@@ -559,6 +568,7 @@ a {
   width: min(640px, 80%);
 }
 .newtab .address {
+  flex: none;
   height: 44px;
   font-size: 15px;
 }
@@ -612,6 +622,134 @@ a {
   white-space: nowrap;
 }
 
+/* ---------- 광고 차단 ---------- */
+.icon-btn .dot.ok {
+  background: var(--success);
+}
+.adblock-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 4px;
+}
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  cursor: pointer;
+}
+.switch-row input {
+  width: 18px;
+  height: 18px;
+}
+.site-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.site-box .host {
+  font-weight: 600;
+  word-break: break-all;
+}
+.site-box .btn {
+  align-self: flex-start;
+}
+.filter-row {
+  align-items: flex-start;
+  padding: 4px 0;
+}
+.filter-row input {
+  margin-top: 3px;
+}
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+  vertical-align: middle;
+  display: inline-flex;
+}
+textarea.input {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+/* ---------- 썸네일 ---------- */
+.thumb {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border-radius: 4px;
+  overflow: hidden;
+  color: var(--muted);
+}
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+.file-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+}
+.file-card:hover {
+  border-color: var(--accent);
+}
+.file-card .thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+}
+.file-card .info {
+  padding: 8px 10px 4px;
+}
+.file-card .n {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-card .m {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.file-card .acts {
+  display: flex;
+  gap: 2px;
+  padding: 0 6px 6px;
+  margin-top: auto;
+}
+
 /* ---------- 다운로드 ---------- */
 .dl-toolbar {
   display: flex;
@@ -635,18 +773,6 @@ a {
   border-radius: var(--radius);
   padding: 10px 12px;
   margin-bottom: 8px;
-}
-.task .thumb {
-  width: 96px;
-  height: 54px;
-  border-radius: 4px;
-  background: var(--bg);
-  object-fit: cover;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted);
 }
 .task .body {
   flex: 1;

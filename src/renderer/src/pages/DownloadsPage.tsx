@@ -4,6 +4,7 @@ import { useApp } from '../state/AppContext'
 import { useDownloads } from '../hooks/useDownloads'
 import { Icon } from '../components/Icon'
 import { Modal, useConfirm } from '../components/Modal'
+import { Thumb, type ThumbSource } from '../components/Thumb'
 import { errorText, fileNameOf, formatBytes, formatEta, formatSpeed, hostOf } from '../lib/format'
 
 type Filter = 'all' | 'active' | 'done'
@@ -152,15 +153,17 @@ function TaskRow({
     }
   }
 
+  const thumbSource: ThumbSource | null = t.thumbnail
+    ? { kind: 'url', url: t.thumbnail }
+    : t.status === 'completed' && t.filePath
+      ? { kind: 'local', path: t.filePath }
+      : t.engine !== 'ytdlp'
+        ? { kind: 'remote', url: t.url, headers: t.headers }
+        : null
+
   return (
     <div className="task">
-      {t.thumbnail ? (
-        <img className="thumb" src={t.thumbnail} alt="" />
-      ) : (
-        <div className="thumb">
-          <Icon name="film" size={22} />
-        </div>
-      )}
+      <Thumb source={thumbSource} width={96} height={54} />
       <div className="body">
         <div className="title" title={t.filePath ?? t.url}>
           <span className={`kind ${t.engine === 'http' ? 'file' : t.engine}`}>{t.engine === 'http' ? 'FILE' : t.engine === 'hls' ? 'HLS' : 'YT-DLP'}</span>

@@ -5,6 +5,7 @@ import { SEARCH_ENGINES } from '@shared/types'
 import { getSettings } from '../settings'
 import { addHistory, updateHistoryTitle } from '../storage/db'
 import type { Sniffer } from './sniffer'
+import type { AdBlocker } from './adblock'
 
 interface Tab {
   id: number
@@ -40,10 +41,12 @@ export class TabManager extends EventEmitter {
   constructor(
     private readonly win: BrowserWindow,
     private readonly session: Session,
-    private readonly sniffer: Sniffer
+    private readonly sniffer: Sniffer,
+    private readonly adblock?: AdBlocker
   ) {
     super()
     sniffer.on('changed', () => this.emitState())
+    adblock?.on('stats', () => this.emitState())
     win.on('resize', () => this.layout())
   }
 
@@ -59,7 +62,7 @@ export class TabManager extends EventEmitter {
     return {
       tabs: this.order.map((id) => {
         const t = this.tabs.get(id)!
-        return { ...t.state, detectedCount: this.sniffer.countFor(id) }
+        return { ...t.state, detectedCount: this.sniffer.countFor(id), blockedCount: this.adblock?.countFor(id) ?? 0 }
       }),
       activeTabId: this.activeId
     }
@@ -81,7 +84,7 @@ export class TabManager extends EventEmitter {
       id,
       view,
       blank: true,
-      state: { id, url: '', title: '새 탭', favicon: null, loading: false, canGoBack: false, canGoForward: false, detectedCount: 0 }
+      state: { id, url: '', title: '새 탭', favicon: null, loading: false, canGoBack: false, canGoForward: false, detectedCount: 0, blockedCount: 0 }
     }
     this.tabs.set(id, tab)
     this.order.push(id)
@@ -296,6 +299,7 @@ export class TabManager extends EventEmitter {
     this.tabs.delete(id)
     this.order = this.order.filter((x) => x !== id)
     this.sniffer.removeTab(id)
+    this.adblock?.resetTab(id)
     if (this.activeId === id) this.activeId = this.order[0] ?? null
     if (this.fullscreenTab === id) {
       this.fullscreenTab = null

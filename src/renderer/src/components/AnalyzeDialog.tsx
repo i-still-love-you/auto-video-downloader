@@ -3,6 +3,7 @@ import type { AnalyzeResult, HlsVariant, YtdlpFormat } from '@shared/types'
 import { useApp } from '../state/AppContext'
 import { Modal } from './Modal'
 import { Icon } from './Icon'
+import { Thumb } from './Thumb'
 import { errorText, formatBytes, formatDuration, hostOf } from '../lib/format'
 
 function variantHeight(v: HlsVariant): number {
@@ -165,7 +166,12 @@ export function AnalyzeDialog(): React.JSX.Element | null {
       {result && (
         <div className="mt-8">
           <div className="analyze-head">
-            {result.thumbnail && <img src={result.thumbnail} alt="" />}
+            <Thumb
+              source={result.thumbnail ? { kind: 'url', url: result.thumbnail } : result.kind !== 'ytdlp' ? { kind: 'remote', url: result.url, headers: result.headers } : null}
+              width={160}
+              height={90}
+              iconSize={28}
+            />
             <div className="info">
               <div>
                 <span className={`kind ${result.kind}`}>{kindLabel}</span>

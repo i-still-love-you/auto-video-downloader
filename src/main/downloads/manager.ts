@@ -11,6 +11,7 @@ import { cleanupHttp, runHttp, stripMediaExt } from './engines/http'
 import { cleanupHls, fetchText, parsePlaylist, pickVariant, runHls } from './engines/hls'
 import { analyzeWithYtdlp, buildSelector, runYtdlp } from './engines/ytdlp'
 import type { EngineContext } from './engines/types'
+import { localThumbnail, remoteThumbnail } from '../thumbnails'
 import { basenameOfUrl, errorMessage, extOfUrl, isAbortError, isMediaExt, newId, parseContentDisposition, rmrf, sanitizeFilename } from '../util'
 import type {
   AnalyzeResult,
@@ -269,6 +270,36 @@ export class DownloadManager extends EventEmitter {
     this.persist()
     this.emitNow(task)
     this.tick()
+    if (!task.thumbnail && task.engine !== 'ytdlp') void this.attachRemoteThumbnail(task)
+  }
+
+  private async attachRemoteThumbnail(task: DownloadTask): Promise<void> {
+    try {
+      const url = await remoteThumbnail(task.url, task.headers)
+      const t = this.tasks.get(task.id)
+      if (url && t && !t.thumbnail) {
+        t.thumbnail = url
+        this.emitNow(t)
+        this.persist()
+      }
+    } catch {
+      /* 썸네일 실패는 무시 */
+    }
+  }
+
+  private async attachLocalThumbnail(task: DownloadTask): Promise<void> {
+    if (!task.filePath) return
+    try {
+      const r = await localThumbnail(task.filePath)
+      const t = this.tasks.get(task.id)
+      if (r.url && t) {
+        t.thumbnail = r.url
+        this.emitNow(t)
+        this.persist()
+      }
+    } catch {
+      /* 썸네일 실패는 무시 */
+    }
   }
 
   pause(id: string): void {
@@ -434,6 +465,7 @@ export class DownloadManager extends EventEmitter {
         /* ignore */
       }
       this.notify({ type: 'success', message: `다운로드 완료: ${path.basename(filePath)}` })
+      void this.attachLocalThumbnail(task)
     } catch (err) {
       const r = this.running.get(task.id)
       if (r?.reason === 'pause' || (isAbortError(err) && r?.reason !== 'cancel')) {
