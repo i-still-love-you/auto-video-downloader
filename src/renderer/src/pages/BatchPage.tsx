@@ -15,7 +15,7 @@ const DEFAULT_OPTIONS: FormOptions = {
   maxItems: 0,
   quality: 'settings',
   skipDownloaded: true,
-  skipLikely: false,
+  skipLikely: true,
   pageDelayMs: 1500,
   filter: ''
 }

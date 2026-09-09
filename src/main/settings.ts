@@ -15,7 +15,8 @@ export function defaultPageScan(): PageScanSettings {
   return { enabled: true, autoLoadMetadata: true }
 }
 
-export const DEFAULT_ADBLOCK_LISTS = ['adguard-base', 'adguard-tracking', 'list-kr', 'ublock-unbreak']
+/** 기본으로 켜는 필터 목록. AdGuard Base(EasyList 포함)와 EasyPrivacy 는 EasyList·AdGuard Tracking 과 겹쳐 기본에서 뺀다 */
+export const DEFAULT_ADBLOCK_LISTS = ['adguard-tracking', 'adguard-social', 'adguard-annoyances', 'list-kr', 'easylist', 'ublock-filters', 'ublock-unbreak']
 
 export function defaultAdblock(): AdblockSettings {
   return { enabled: true, lists: [...DEFAULT_ADBLOCK_LISTS], customRules: '', allowlist: [], doh: false }

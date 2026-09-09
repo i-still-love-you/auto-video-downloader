@@ -110,7 +110,7 @@ export function normalizeOptions(o: Partial<BatchOptions> | undefined): BatchOpt
     maxItems: num(o?.maxItems, 0, 0, 100_000),
     quality,
     skipDownloaded: o?.skipDownloaded !== false,
-    skipLikely: o?.skipLikely === true,
+    skipLikely: o?.skipLikely !== false,
     pageDelayMs: num(o?.pageDelayMs, 1500, 0, 600_000),
     filter: typeof o?.filter === 'string' ? o.filter.trim().slice(0, 200) : '',
     tabId: typeof o?.tabId === 'number' && Number.isInteger(o.tabId) ? o.tabId : undefined
