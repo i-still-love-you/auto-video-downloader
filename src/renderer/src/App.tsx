@@ -40,7 +40,7 @@ export function App(): React.JSX.Element {
       <nav className="sidebar">
         <div className="brand">
           <Icon name="film" size={22} />
-          <span>Video Downloader</span>
+          <span>Auto Video Downloader</span>
         </div>
         {NAV.map((n) => (
           <button key={n.id} className={`nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)}>

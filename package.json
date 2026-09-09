@@ -1,6 +1,6 @@
 {
-  "name": "video-downloader",
-  "version": "0.1.0",
+  "name": "auto-video-downloader",
+  "version": "0.1.1",
   "description": "PC용 비디오 다운로더 - 내장 브라우저 동영상 자동 감지, HLS/MP4 다운로드, 내장 플레이어, 개인 폴더",
   "main": "./out/main/index.js",
   "author": "d9",

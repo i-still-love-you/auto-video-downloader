@@ -1,5 +1,5 @@
 appId: com.d9.videodownloader
-productName: Video Downloader
+productName: Auto Video Downloader
 copyright: Copyright © 2026 d9
 directories:
   buildResources: build
@@ -31,7 +31,7 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
-  shortcutName: Video Downloader
+  shortcutName: Auto Video Downloader
   artifactName: ${productName}-${version}-setup.${ext}
 
 mac:

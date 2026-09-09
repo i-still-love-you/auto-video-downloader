@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, dialog, session, shell, webContents, type Session } from 'electron'
 import path from 'node:path'
+import fs from 'node:fs'
 import { installProtocols, registerSchemes } from './protocols'
 import { flushSettings, getSettings, initSettings } from './settings'
 import { flushDb, initDb } from './storage/db'
@@ -26,8 +27,22 @@ process.on('uncaughtException', (err) => {
   console.error('메인 프로세스 예외 (계속 진행):', err)
   if (win && !win.isDestroyed()) win.webContents.send(IPC.app.evNotify, { type: 'error', message: `내부 오류가 났지만 계속 진행합니다: ${errorMessage(err)}` })
 })
+/**
+ * 앱 이름이 "video-downloader" 에서 "auto-video-downloader" 로 바뀌면서 기본 사용자 데이터 폴더(%APPDATA%\<앱 이름>)도 함께 바뀌었다.
+ * 이전 이름으로 쓰던 설정·다운로드 이력·세션·개인 폴더가 사라진 것처럼 보이지 않도록, 새 폴더에는 아직 데이터가 없고 이전 폴더에
+ * 있으면 이전 폴더를 그대로 쓴다. (setPath 는 requestSingleInstanceLock 과 ready 이전에 불러야 한다)
+ */
+function useLegacyUserDataIfPresent(): void {
+  const markers = ['settings.json', 'library.json', 'downloads.json', 'session.json', 'history.json']
+  const hasData = (dir: string): boolean => markers.some((f) => fs.existsSync(path.join(dir, f)))
+  const current = app.getPath('userData')
+  const legacy = path.join(app.getPath('appData'), 'video-downloader')
+  if (legacy === current || hasData(current) || !hasData(legacy)) return
+  app.setPath('userData', legacy)
+}
 // 포터블 모드/테스트용 사용자 데이터 폴더 지정
 if (process.env.VDL_USER_DATA) app.setPath('userData', path.resolve(process.env.VDL_USER_DATA))
+else useLegacyUserDataIfPresent()
 
 const CSP = [
   "default-src 'self'",
@@ -60,7 +75,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 /**
- * 브라우저 탭·UI 렌더러·다운로드가 모두 함께 쓰는 User-Agent. 기본 UA 에서 앱 이름 토큰("video-downloader/0.1.0")만 빼고
+ * 브라우저 탭·UI 렌더러·다운로드가 모두 함께 쓰는 User-Agent. 기본 UA 에서 앱 이름 토큰("auto-video-downloader/<버전>")만 빼고
  * "Electron/xx" 토큰은 그대로 둔다.
  *
  * Cloudflare 보안 확인("Performing security verification")이 끝나지 않고 멈추는 원인이 두 가지 있었다.
@@ -86,7 +101,7 @@ async function createWindow(): Promise<void> {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#0a0a0a',
-    title: 'Video Downloader',
+    title: 'Auto Video Downloader',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -116,7 +131,7 @@ async function createWindow(): Promise<void> {
     void dialog
       .showMessageBox(w, {
         type: 'warning',
-        title: 'Video Downloader',
+        title: 'Auto Video Downloader',
         message: '화면이 응답하지 않습니다',
         detail: '다운로드는 계속 진행됩니다. 화면만 다시 불러올 수 있습니다.',
         buttons: ['다시 불러오기', '기다리기'],

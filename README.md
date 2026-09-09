@@ -1,4 +1,4 @@
-# Video Downloader (PC)
+# Auto Video Downloader (PC)
 
 내장 브라우저로 웹 페이지의 동영상 소스를 자동 감지해 내려받는 데스크톱 앱입니다. Electron + TypeScript + React 로 만들었으며
 Windows / macOS / Linux 에서 동작합니다. 모바일 비디오 다운로더 앱의 기능 구성을 PC 환경에 맞게 옮긴 것입니다.
