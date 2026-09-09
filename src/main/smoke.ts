@@ -2,7 +2,7 @@ import { app, net, type BrowserWindow, type WebContents } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { TabManager } from './browser/tabs'
-import type { Sniffer } from './browser/sniffer'
+import { debugLog as sniffLog, type Sniffer } from './browser/sniffer'
 import type { AdBlocker } from './browser/adblock'
 import { mediaUrlFor, proxyUrlFor } from './protocols'
 import { getSettings } from './settings'
@@ -125,7 +125,7 @@ export function runSmoke(win: BrowserWindow, tabs: TabManager, sniffer: Sniffer,
         const p = params as { type: string; response: { url: string; status: number; mimeType: string; headers: Record<string, string> } }
         const h = p.response.headers
         const len = h['content-length'] ?? h['Content-Length'] ?? '-'
-        netLog.push(`${p.response.status} ${p.type} ${p.response.mimeType} len=${len} ${p.response.url.slice(0, 220)}`)
+        netLog.push(`${p.response.status} ${p.type} ${p.response.mimeType} len=${len} ${p.response.url.slice(0, 600)}`)
       })
       void wc.debugger.sendCommand('Network.enable').catch((e) => consoleLines.push(`[smoke] netlog enable failed: ${e}`))
     } catch (e) {
@@ -263,10 +263,35 @@ export function runSmoke(win: BrowserWindow, tabs: TabManager, sniffer: Sniffer,
     } catch (e) {
       tabPage = String(e)
     }
+    // 점검 탭의 모든 프레임(iframe 포함)의 주소와 그 안의 video/iframe 요소 (preload 스캔이 프레임 안에서 무엇을 봤어야 하는지)
+    let frames: unknown = null
+    try {
+      const wc = smokeTabId !== null && tabs.hasTab(smokeTabId) ? tabs.activeWebContents() : undefined
+      if (wc) {
+        frames = await Promise.all(
+          wc.mainFrame.framesInSubtree.map(async (f) => {
+            let dom: unknown = null
+            try {
+              dom = await f.executeJavaScript(
+                '({ videos: Array.from(document.querySelectorAll("video,source")).map(v => ({ tag: v.tagName, src: (v.getAttribute("src")||"").slice(0,300), cur: (v.currentSrc||"").slice(0,300) })), iframes: Array.from(document.querySelectorAll("iframe")).map(i => (i.getAttribute("src")||"").slice(0,200)), scripts: Array.from(document.querySelectorAll("script[src]")).map(s => s.src.slice(0,120)) })',
+                true
+              )
+            } catch (e) {
+              dom = String(e)
+            }
+            return { url: f.url.slice(0, 300), name: f.name, origin: f.origin, pid: f.processId, top: f === wc.mainFrame, dom }
+          })
+        )
+      }
+    } catch (e) {
+      frames = String(e)
+    }
     const report: Record<string, unknown> = {
       activePage,
       navLog,
       tabPage,
+      frames,
+      sniffLog,
       tabConsole,
       netLog,
       tabs: tabs.getState(),

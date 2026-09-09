@@ -96,7 +96,7 @@ src/
     tools/binaries.ts 도구 탐색/버전/자동 설치
     storage/         JSON 저장소, 방문 기록/즐겨찾기
     updater.ts       electron-updater 연동
-    smoke.ts         VDL_SMOKE=1 자동 점검 모드
+    smoke.ts         VDL_SMOKE=1 자동 점검 모드 (VDL_DEBUG_SNIFF=1 을 함께 주면 감지기의 응답별 판정 과정이 리포트의 sniffLog 에 남는다)
   renderer/src/
     App.tsx          사이드바 + 페이지 전환
     pages/           Browser, Downloads, Batch(자동 다운로드), Files, Player, Vault, Settings

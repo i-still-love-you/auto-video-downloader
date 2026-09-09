@@ -146,7 +146,7 @@ export class DownloadManager extends EventEmitter {
       probe = null
     }
     if (probe && probe.status < 400) {
-      const c = classify(probe.finalUrl, probe.mime, probe.size, probe.disp ?? undefined)
+      const c = classify(probe.finalUrl, probe.mime, probe.size, probe.disp ?? undefined, { wholeFile: true })
       if (c?.kind === 'hls') return this.analyzeHls(url, hdrs, pageUrl, pageTitle)
       if (c?.kind === 'file' || (isMediaExt(ext) && !/text\/html/i.test(probe.mime))) {
         return this.fileResult(url, hdrs, probe, pageUrl, pageTitle)

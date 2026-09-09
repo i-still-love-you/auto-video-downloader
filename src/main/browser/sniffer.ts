@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import path from 'node:path'
 import { webContents, type OnHeadersReceivedListenerDetails, type Session } from 'electron'
 import type { DetectedMedia, MediaKind, ScanPayload } from '@shared/types'
-import { basenameOfUrl, extOfUrl, isMediaExt, mimeFromExt, newId, parseContentDisposition } from '../util'
+import { basenameOfUrl, errorMessage, extOfUrl, isMediaExt, mimeFromExt, newId, parseContentDisposition } from '../util'
 import { cookieHeaderFor } from '../downloads/net'
 import { getSettings } from '../settings'
 import { Prober } from './prober'
@@ -11,9 +11,22 @@ const SKIP_EXT = new Set([
   'ts', 'm4s', 'm4f', 'vtt', 'srt', 'key', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'js', 'css', 'html',
   'htm', 'json', 'xml', 'txt', 'woff', 'woff2', 'ttf', 'map'
 ])
-const SEGMENT_PATTERN =
-  /(?:^|[/_\-.])(?:seg(?:ment)?|chunk|frag(?:ment)?|piece)[-_]?\d+|[-_]\d{2,}\.(?:m4s|mp4)$|\/init(?:-[\w]+)?\.mp4$|\/\d+\.m4s$/i
+/** 이름만으로 세그먼트임이 드러나는 경우: seg-3, chunk_12, frag7, init.mp4, 12.m4s */
+const SEGMENT_NAME = /(?:^|[/_\-.])(?:seg(?:ment)?|chunk|frag(?:ment)?|piece)[-_]?\d+|\/init(?:-[\w]+)?\.mp4$|\/\d+\.m4s$/i
+/** 번호만 붙은 이름: 세그먼트(video_00012.mp4)일 수도, 작품 번호가 붙은 파일(abcd-019.mp4)일 수도 있어 크기·요청 종류로 가른다 */
+const NUMBERED_NAME = /[-_]\d{2,}\.(?:m4s|mp4)$/i
+/** 번호만 붙은 이름이라도 전체 크기가 이보다 크면 파일로 본다 (HLS/DASH 조각은 보통 몇 MB 이하) */
+const WHOLE_FILE_MIN = 32 * 1024 * 1024
 const MAX_PER_TAB = 200
+/** VDL_DEBUG_SNIFF=1: 미디어로 보이는 응답마다 판정 과정을 기록한다 (smoke 리포트의 sniffLog 에도 포함) */
+const DEBUG = !!process.env.VDL_DEBUG_SNIFF
+export const debugLog: string[] = []
+function dlog(line: string): void {
+  if (!DEBUG) return
+  debugLog.push(line)
+  if (debugLog.length > 500) debugLog.shift()
+  console.log(`[sniff] ${line}`)
+}
 
 export interface Classified {
   kind: MediaKind
@@ -22,8 +35,18 @@ export interface Classified {
   filename: string | null
 }
 
-/** 응답 헤더와 URL만 보고 미디어 여부를 판별한다. */
-export function classify(url: string, mime: string, size: number | null, disposition?: string): Classified | null {
+export interface ClassifyHint {
+  /** webRequest 의 resourceType. 'media' 는 <video>/<audio> 요소가 통째로 재생하는 응답이므로 세그먼트가 아니다 (MSE 조각은 xhr/fetch 로 온다) */
+  resourceType?: string
+  /** 사용자가 직접 지정한 주소처럼 세그먼트일 리 없는 경우 */
+  wholeFile?: boolean
+}
+
+/**
+ * 응답 헤더와 URL만 보고 미디어 여부를 판별한다.
+ * 이름이 세그먼트처럼 보이는 파일은 제외하되, 요소가 직접 재생하는 응답이거나 전체 크기가 충분히 크면 파일로 본다.
+ */
+export function classify(url: string, mime: string, size: number | null, disposition?: string, hint?: ClassifyHint): Classified | null {
   const m = (mime || '').split(';')[0].trim().toLowerCase()
   const ext = extOfUrl(url)
   const dispName = parseContentDisposition(disposition)
@@ -48,7 +71,11 @@ export function classify(url: string, mime: string, size: number | null, disposi
   } catch {
     return null
   }
-  if (SEGMENT_PATTERN.test(pathname)) return null
+  const whole = hint?.wholeFile || hint?.resourceType === 'media'
+  if (!whole) {
+    if (SEGMENT_NAME.test(pathname)) return null
+    if (NUMBERED_NAME.test(pathname) && !(size !== null && size >= WHOLE_FILE_MIN)) return null
+  }
 
   const filename = dispName ?? (isMediaExt(ext) ? basenameOfUrl(url) : null)
   return { kind: 'file', mime: m || mimeFromExt(ext || dispExt || 'mp4'), size, filename }
@@ -108,8 +135,8 @@ export class Sniffer extends EventEmitter {
   handleHeadersReceived(details: OnHeadersReceivedListenerDetails): void {
     try {
       this.inspect(details)
-    } catch {
-      /* 감지 실패는 무시 */
+    } catch (e) {
+      dlog(`threw ${errorMessage(e)} ${details.url.slice(0, 300)}`)
     }
   }
 
@@ -127,14 +154,21 @@ export class Sniffer extends EventEmitter {
   }
 
   private inspect(details: OnHeadersReceivedListenerDetails): void {
-    if (details.statusCode >= 300 && details.statusCode !== 304) return
-    if (details.method !== 'GET') return
-    const tabId = details.webContentsId ?? -1
-    if (tabId < 0 || !this.isTab(tabId)) return
     const h = lowerHeaders(details.responseHeaders)
-    const c = classify(details.url, h['content-type'] ?? '', totalSize(h), h['content-disposition'])
-    if (!c) return
-    if (c.kind === 'file' && c.size !== null && c.size < getSettings().detectMinSize) return
+    const ct = h['content-type'] ?? ''
+    const mediaLike = ct.startsWith('video/') || ct.startsWith('audio/') || ct.includes('mpegurl') || ct.includes('dash+xml') || ct.includes('octet-stream')
+    const interesting = DEBUG && (details.resourceType === 'media' || mediaLike)
+    const trace = (why: string): void => {
+      if (interesting) dlog(`${why} status=${details.statusCode} type=${details.resourceType} wc=${details.webContentsId} frame=${details.frame?.url?.slice(0, 80) ?? '-'} ct=${ct} cl=${h['content-length'] ?? '-'} cr=${h['content-range'] ?? '-'} cd=${h['content-disposition'] ?? '-'} ${details.url.slice(0, 300)}`)
+    }
+    if (details.statusCode >= 300 && details.statusCode !== 304) return trace('skip:status')
+    if (details.method !== 'GET') return trace('skip:method')
+    const tabId = details.webContentsId ?? -1
+    if (tabId < 0 || !this.isTab(tabId)) return trace('skip:not-tab')
+    const c = classify(details.url, ct, totalSize(h), h['content-disposition'], { resourceType: details.resourceType })
+    if (!c) return trace('skip:classify')
+    if (c.kind === 'file' && c.size !== null && c.size < getSettings().detectMinSize) return trace('skip:small')
+    trace(`ok:${c.kind}`)
 
     const seen = this.seen.get(tabId) ?? new Set<string>()
     this.seen.set(tabId, seen)
