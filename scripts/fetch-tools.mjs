@@ -62,9 +62,21 @@ async function download(url, dest) {
   process.stdout.write('\n')
 }
 
+// 압축 해제에 쓸 tar. Windows 는 내장 bsdtar(System32\tar.exe)가 zip 도 풀 수 있으므로 그것을 우선 쓴다.
+// PATH 에 Git 의 GNU tar 가 먼저 잡히면 zip 을 읽지 못하고 "C:\..." 경로를 원격 호스트로 해석해 실패한다.
+function tarCommand() {
+  if (process.platform === 'win32') {
+    const sys = path.join(process.env.SystemRoot || 'C:\Windows', 'System32', 'tar.exe')
+    if (existsSync(sys)) return sys
+  }
+  return 'tar'
+}
+
+// 어느 tar 든 안전하도록 아카이브가 있는 폴더를 작업 디렉터리로 잡고 상대 경로만 넘긴다
 function tar(archive, dest) {
+  const cwd = path.dirname(archive)
   return new Promise((resolve, reject) => {
-    const child = spawn('tar', ['-xf', archive, '-C', dest], { stdio: 'inherit' })
+    const child = spawn(tarCommand(), ['-xf', path.basename(archive), '-C', path.relative(cwd, dest) || '.'], { cwd, stdio: 'inherit' })
     child.on('error', reject)
     child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`tar exit ${code}`))))
   })
