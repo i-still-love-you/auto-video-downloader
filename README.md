@@ -120,6 +120,10 @@ src/
 
 ## 제한 사항과 안내
 
+- User-Agent 는 Electron 기본값에서 앱 이름 토큰만 뺀 값(`... Chrome/xx Electron/xx Safari/537.36`)이고, UI 렌더러를 포함한
+  모든 세션과 다운로드·yt-dlp·썸네일이 같은 값을 씁니다(`main/index.ts` 의 `browserUserAgent`). Electron 토큰까지 지워 순정
+  Chrome 처럼 꾸미거나 세션마다 다른 UA 를 쓰면 Cloudflare 보안 확인("Performing security verification")이 끝나지 않으므로
+  바꾸지 마세요. 보안 확인은 탭 세션마다 한 번씩 거치고, 탭 세션이 메모리 전용이라 앱을 다시 켜면 다시 확인합니다.
 - DRM(Widevine, FairPlay, SAMPLE-AES 등) 으로 보호된 콘텐츠는 감지 단계에서 제외되거나 오류로 처리되며 지원하지 않습니다.
 - 라이브(종료되지 않은) HLS 스트림은 다운로드 대상이 아닙니다.
 - 내장 플레이어는 Chromium 이 디코딩할 수 있는 코덱만 재생합니다. 그 외 형식은 "기본 프로그램으로 열기" 를 사용하세요.

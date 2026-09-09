@@ -59,11 +59,23 @@ if (!app.requestSingleInstanceLock()) {
   })
 }
 
+/**
+ * 브라우저 탭·UI 렌더러·다운로드가 모두 함께 쓰는 User-Agent. 기본 UA 에서 앱 이름 토큰("video-downloader/0.1.0")만 빼고
+ * "Electron/xx" 토큰은 그대로 둔다.
+ *
+ * Cloudflare 보안 확인("Performing security verification")이 끝나지 않고 멈추는 원인이 두 가지 있었다.
+ * 1) Electron 토큰까지 지워 순정 Chrome 처럼 보이게 하면 실패한다. UA 는 Chrome 이라고 하는데 Client Hints
+ *    (navigator.userAgentData) 브랜드는 "Chromium" 뿐이라 위장으로 판정된다. Electron 토큰이 있으면 몇 초 만에 통과한다.
+ * 2) 같은 앱 안에서 요청마다 UA 가 다르면 실패한다. 탭 세션만 setUserAgent 로 바꾸면 UI 렌더러(기본 세션)가 탭 목록의
+ *    favicon 을 원래 UA(앱 이름 토큰 포함)로 같은 사이트에 요청하므로, 한 클라이언트가 두 UA 를 쓰는 것으로 보인다.
+ *    그래서 세션별로 덮어쓰지 않고 app.userAgentFallback 자체를 바꿔 모든 세션이 같은 문자열을 쓰게 한다.
+ * (Cloudflare 의 cf_clearance 쿠키는 UA 에 묶이므로 다운로드·yt-dlp·썸네일도 이 값을 그대로 써야 한다)
+ */
 function browserUserAgent(): string {
-  return app.userAgentFallback
-    .replace(/ Electron\/\S+/, '')
-    .replace(new RegExp(` ${app.getName().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/\\S+`), '')
+  const name = app.getName().replace(/\s+/g, '')
+  return app.userAgentFallback.replace(new RegExp(` ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/\\S+`), '')
 }
+app.userAgentFallback = browserUserAgent()
 
 async function createWindow(): Promise<void> {
   win = new BrowserWindow({

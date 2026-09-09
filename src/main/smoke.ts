@@ -1,4 +1,4 @@
-import { app, net, type BrowserWindow } from 'electron'
+import { app, net, type BrowserWindow, type WebContents } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { TabManager } from './browser/tabs'
@@ -111,7 +111,74 @@ export function runSmoke(win: BrowserWindow, tabs: TabManager, sniffer: Sniffer,
     consoleLines.push(`[${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`)
   })
   let smokeTabId: number | null = null
-  if (url) setTimeout(() => (smokeTabId = tabs.newTab(url, true)), 1500)
+  // 점검 탭 안의 콘솔(보안 확인 페이지의 오류 코드 등)도 함께 기록한다
+  const tabConsole: string[] = []
+  // VDL_SMOKE_NETLOG=1: 점검 탭의 모든 응답(iframe 안 포함)을 DevTools 프로토콜로 기록한다.
+  // 세션의 webRequest 리스너는 감지기·차단기가 쓰고 있으므로 건드리지 않고 디버거를 붙인다.
+  const netLog: string[] = []
+  const attachNetLog = (wc: WebContents): void => {
+    if (!process.env.VDL_SMOKE_NETLOG) return
+    try {
+      wc.debugger.attach('1.3')
+      wc.debugger.on('message', (_e, method, params) => {
+        if (method !== 'Network.responseReceived') return
+        const p = params as { type: string; response: { url: string; status: number; mimeType: string; headers: Record<string, string> } }
+        const h = p.response.headers
+        const len = h['content-length'] ?? h['Content-Length'] ?? '-'
+        netLog.push(`${p.response.status} ${p.type} ${p.response.mimeType} len=${len} ${p.response.url.slice(0, 220)}`)
+      })
+      void wc.debugger.sendCommand('Network.enable').catch((e) => consoleLines.push(`[smoke] netlog enable failed: ${e}`))
+    } catch (e) {
+      consoleLines.push(`[smoke] netlog attach failed: ${e}`)
+    }
+  }
+  if (url) {
+    setTimeout(() => {
+      smokeTabId = tabs.newTab(url, true)
+      const wc = tabs.activeWebContents()
+      if (!wc) return
+      wc.on('console-message', (event) => {
+        tabConsole.push(`[${event.level}] ${event.message.slice(0, 300)} (${event.sourceId.slice(0, 120)}:${event.lineNumber})`)
+      })
+      attachNetLog(wc)
+    }, 1500)
+  }
+  // VDL_SMOKE_TABCLICK_SEL: "선택자@ms;선택자@ms" 형식. 점검 탭에서 선택자 요소를 화면 가운데로 스크롤한 뒤 그 중앙에 실제 마우스 클릭을 보낸다
+  const clickSels = process.env.VDL_SMOKE_TABCLICK_SEL
+  if (clickSels) {
+    for (const spec of clickSels.split(';')) {
+      const at = spec.lastIndexOf('@')
+      if (at < 0) continue
+      const sel = spec.slice(0, at).trim()
+      const delay = Number(spec.slice(at + 1))
+      if (!sel || !Number.isFinite(delay)) continue
+      setTimeout(async () => {
+        if (smokeTabId === null || !tabs.hasTab(smokeTabId)) return
+        tabs.activate(smokeTabId)
+        const wc = tabs.activeWebContents()
+        if (!wc) return
+        try {
+          const r = (await wc.executeJavaScript(
+            `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return null; el.scrollIntoView({ block: 'center' }); const b = el.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height } })()`,
+            true
+          )) as { x: number; y: number; w: number; h: number } | null
+          if (!r) {
+            consoleLines.push(`[smoke] tab click ${sel}: missing`)
+            return
+          }
+          const x = Math.round(r.x)
+          const y = Math.round(r.y)
+          wc.focus()
+          wc.sendInputEvent({ type: 'mouseMove', x, y })
+          wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+          wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+          consoleLines.push(`[smoke] tab click ${sel} at ${x},${y} (${Math.round(r.w)}x${Math.round(r.h)}) @${delay}`)
+        } catch (e) {
+          consoleLines.push(`[smoke] tab click ${sel} failed: ${e}`)
+        }
+      }, delay)
+    }
+  }
   // VDL_SMOKE_URL2: 3초 뒤 두 번째 탭, VDL_SMOKE_JS: 6초 뒤 렌더러에서 실행할 JS (window.api 사용 가능)
   const url2 = process.env.VDL_SMOKE_URL2
   if (url2) setTimeout(() => tabs.newTab(url2, true), 3000)
@@ -183,9 +250,25 @@ export function runSmoke(win: BrowserWindow, tabs: TabManager, sniffer: Sniffer,
     } catch (e) {
       activePage = String(e)
     }
+    // 점검 탭 페이지의 제목·본문 앞부분·창 크기 (보안 확인 페이지에 막혔는지, 무엇이라고 표시되는지)
+    let tabPage: unknown = null
+    try {
+      const wc = smokeTabId !== null && tabs.hasTab(smokeTabId) ? tabs.activeWebContents() : undefined
+      if (wc) {
+        tabPage = await wc.executeJavaScript(
+          '({ title: document.title, href: location.href, text: (document.body?.innerText ?? "").slice(0, 600), ua: navigator.userAgent, inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight], vis: document.visibilityState, focus: document.hasFocus() })',
+          true
+        )
+      }
+    } catch (e) {
+      tabPage = String(e)
+    }
     const report: Record<string, unknown> = {
       activePage,
       navLog,
+      tabPage,
+      tabConsole,
+      netLog,
       tabs: tabs.getState(),
       detected: sniffer.getDetected(),
       console: consoleLines,
