@@ -159,6 +159,7 @@ export function registerIpc(d: IpcDeps): void {
   handle(IPC.batch.retryItem, (_e, id: string, itemId: string) => d.batch.retryItem(id, itemId))
   handle(IPC.batch.resumeItem, (_e, id: string, itemId: string) => d.batch.resumeItem(id, itemId))
   handle(IPC.batch.skipItem, (_e, id: string, itemId: string) => d.batch.skipItem(id, itemId))
+  handle(IPC.batch.continueNow, (_e, id: string) => d.batch.continueNow(id))
   d.batch.on('update', (j) => send(IPC.batch.evUpdate, j))
   d.batch.on('removed', (id) => send(IPC.batch.evRemoved, id))
   d.batch.on('notify', (n) => notify(n))

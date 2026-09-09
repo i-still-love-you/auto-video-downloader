@@ -39,6 +39,9 @@ const LOOKAHEAD = 6
 /** 동시에 영상 페이지를 확인하는 수 */
 const RESOLVE_PARALLEL = 2
 const MAX_VISITED = 3000
+/** 목록 페이지를 읽지 못했을 때 같은 페이지를 다시 읽기까지 기다리는 시간 */
+const CRAWL_RETRY_MS = 5 * 60_000
+const CRAWL_FAIL_PREFIX = '목록 페이지를 읽지 못했습니다: '
 const FETCH_TIMEOUT = 25_000
 const MAX_JOBS = 50
 
@@ -227,6 +230,20 @@ class JobRunner {
     })
   }
 
+  /** 실패 후 다음 확인을 기다리는 중이면 기다리지 않고 지금 바로 목록 페이지를 읽는다 */
+  retryNow(): void {
+    if (this.finished) return
+    this.job.pages.retryAt = null
+    if (this.job.error?.startsWith(CRAWL_FAIL_PREFIX)) this.job.error = undefined
+    this.lastCrawlAt = 0
+    if (this.delayTimer) {
+      clearTimeout(this.delayTimer)
+      this.delayTimer = null
+    }
+    this.mgr.changed(this.job, true)
+    this.kick()
+  }
+
   private quality(): PreferredQuality {
     const q = this.job.options.quality
     if (q !== 'settings') return q
@@ -261,7 +278,11 @@ class JobRunner {
     }
 
     if (!job.pages.done && !this.crawling && counts.found < LOOKAHEAD) {
-      const wait = this.lastCrawlAt ? job.options.pageDelayMs - (Date.now() - this.lastCrawlAt) : 0
+      const now = Date.now()
+      // 목록 읽기에 실패했으면 retryAt 까지 기다렸다가 같은 페이지를 다시 읽는다 ("지금 다시 확인"은 retryAt 을 지우고 kick 한다)
+      const retryWait = job.pages.retryAt ? job.pages.retryAt - now : 0
+      const delayWait = this.lastCrawlAt ? job.options.pageDelayMs - (now - this.lastCrawlAt) : 0
+      const wait = Math.max(retryWait, delayWait)
       if (wait > 0) {
         if (!this.delayTimer) {
           this.delayTimer = setTimeout(() => {
@@ -274,9 +295,13 @@ class JobRunner {
         void this.crawlNext()
           .catch((e) => {
             if (this.finished || isAbortError(e)) return
-            // 한 페이지 실패는 그 자리에서 끝낸 것으로 본다 (이미 찾은 항목은 계속 처리)
-            job.pages.done = true
-            job.error = `목록 페이지를 읽지 못했습니다: ${errorMessage(e)}`
+            // 목록 페이지를 못 읽는 것은 사이트 응답 지연이나 일시 차단처럼 지나가는 문제일 때가 많다. 작업을 끝내지 않고
+            // 일정 시간 뒤에 같은 페이지를 다시 읽는다 (이미 찾은 항목은 그동안 계속 처리). 기다리는 동안 숨김 창은 없앤다.
+            job.pages.retryCount = (job.pages.retryCount ?? 0) + 1
+            job.pages.retryAt = Date.now() + CRAWL_RETRY_MS
+            job.error = `${CRAWL_FAIL_PREFIX}${errorMessage(e)} (${job.pages.retryCount}번째 실패, ${Math.round(CRAWL_RETRY_MS / 60_000)}분 후 다시 확인)`
+            this.loader?.destroy()
+            this.loader = null
           })
           .finally(() => {
             this.crawling = false
@@ -332,6 +357,12 @@ class JobRunner {
     if (!this.loader) this.loader = new PageLoader(this.deps.sessionFor(job.options.tabId))
     const page = await this.loader.load(url, { filter: job.options.filter, referer: job.pages.lastUrl, signal: this.abort.signal })
     if (this.finished) return
+    if (job.pages.retryAt || job.pages.retryCount) {
+      // 다시 읽기에 성공했으면 실패 표시를 지운다
+      job.pages.retryAt = null
+      job.pages.retryCount = 0
+      if (job.error?.startsWith(CRAWL_FAIL_PREFIX)) job.error = undefined
+    }
 
     job.pages.visited.push(url)
     if (page.url && page.url !== url) job.pages.visited.push(page.url)
@@ -505,7 +536,9 @@ export class BatchManager extends EventEmitter {
         nextUrl: typeof pages.nextUrl === 'string' ? pages.nextUrl : pages.nextUrl === null ? null : job.sourceUrl,
         lastUrl: typeof pages.lastUrl === 'string' ? pages.lastUrl : undefined,
         done: !!pages.done,
-        visited: Array.isArray(pages.visited) ? pages.visited : []
+        visited: Array.isArray(pages.visited) ? pages.visited : [],
+        retryAt: typeof pages.retryAt === 'number' ? pages.retryAt : null,
+        retryCount: typeof pages.retryCount === 'number' ? pages.retryCount : 0
       }
       job.items = Array.isArray(job.items) ? job.items : []
       if (job.status === 'running') job.status = 'paused'
@@ -652,7 +685,7 @@ export class BatchManager extends EventEmitter {
       status: 'paused',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      pages: { scanned: 0, nextUrl: pageUrlFor(src, opts.startPage), done: false, visited: [] },
+      pages: { scanned: 0, nextUrl: pageUrlFor(src, opts.startPage), done: false, visited: [], retryAt: null, retryCount: 0 },
       items: []
     }
     this.jobs.set(job.id, job)
@@ -671,6 +704,8 @@ export class BatchManager extends EventEmitter {
 
   private launch(job: BatchJob): void {
     if (this.runners.has(job.id)) return
+    // 사용자가 직접 이어서 실행하면 실패 대기 시간은 무시하고 바로 읽는다
+    job.pages.retryAt = null
     // 이 작업이 넣어 둔 다운로드 중 일시정지된 것을 먼저 깨운다 (재시작 후 이어서 할 때 필수)
     this.syncTasks(job, true)
     const runner = new JobRunner(job, this, this.deps)
@@ -688,6 +723,25 @@ export class BatchManager extends EventEmitter {
     }
     job.error = undefined
     if (!job.pages.done && !job.pages.nextUrl) job.pages.done = true
+    this.launch(job)
+  }
+
+  /**
+   * 목록 페이지 읽기를 강제로 진행한다. 실패 뒤 다음 확인을 기다리는 중이면 지금 바로 읽고,
+   * 끝난(완료·중지·일시정지) 작업이면 남아 있는 목록 주소부터 이어서 읽는다.
+   */
+  continueNow(id: string): void {
+    const job = this.jobs.get(id)
+    if (!job) return
+    const r = this.runners.get(id)
+    if (r) {
+      r.retryNow()
+      return
+    }
+    if (!job.pages.nextUrl) return
+    job.pages.done = false
+    job.pages.retryAt = null
+    job.error = undefined
     this.launch(job)
   }
 

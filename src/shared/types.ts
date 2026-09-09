@@ -399,6 +399,10 @@ export interface BatchPages {
   lastUrl?: string
   done: boolean
   visited: string[]
+  /** 목록 페이지 읽기에 실패해 다음 확인을 기다리는 시각. 실패 상태가 아니면 null */
+  retryAt?: number | null
+  /** 같은 페이지의 연속 실패 횟수 (성공하면 0) */
+  retryCount?: number
 }
 
 export interface BatchJob {

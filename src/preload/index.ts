@@ -121,6 +121,8 @@ const api = {
     retryItem: (id: string, itemId: string) => invoke<void>(IPC.batch.retryItem, id, itemId),
     resumeItem: (id: string, itemId: string) => invoke<void>(IPC.batch.resumeItem, id, itemId),
     skipItem: (id: string, itemId: string) => invoke<void>(IPC.batch.skipItem, id, itemId),
+    /** 목록 읽기 실패 뒤 기다리지 않고 지금 다시 읽거나, 끝난 작업을 남은 목록 페이지부터 강제로 이어서 읽는다 */
+    continueNow: (id: string) => invoke<void>(IPC.batch.continueNow, id),
     onUpdate: (cb: (j: BatchJob) => void) => on<BatchJob>(IPC.batch.evUpdate, cb),
     onRemoved: (cb: (id: string) => void) => on<string>(IPC.batch.evRemoved, cb)
   },

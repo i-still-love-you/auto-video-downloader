@@ -69,6 +69,7 @@ export const IPC = {
     retryItem: 'batch:retryItem',
     resumeItem: 'batch:resumeItem',
     skipItem: 'batch:skipItem',
+    continueNow: 'batch:continueNow',
     evUpdate: 'batch:ev:update',
     evRemoved: 'batch:ev:removed'
   },

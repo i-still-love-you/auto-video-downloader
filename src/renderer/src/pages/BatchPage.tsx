@@ -389,6 +389,11 @@ const JobCard = React.memo(function JobCard({
     return job.items
   }, [job.items, itemFilter])
   const canResume = job.status === 'paused' || job.status === 'stopped' || job.status === 'error' || (job.status === 'completed' && (c.found > 0 || c.paused > 0 || !job.pages.done))
+  /** 목록 페이지 읽기에 실패해 다음 확인(5분 간격)을 기다리는 중 */
+  const waitingRetry = job.status === 'running' && !!job.pages.retryAt
+  /** 목록 페이지 읽기 실패로 끝난 작업: 남은 주소가 있으므로 강제로 이어서 읽을 수 있다 */
+  const endedByCrawlFailure = job.status !== 'running' && job.pages.done && !!job.pages.nextUrl && !!job.error
+  const retryTime = job.pages.retryAt ? new Date(job.pages.retryAt).toTimeString().slice(0, 5) : ''
 
   return (
     <div className={`batch-job ${job.status}`}>
@@ -412,6 +417,15 @@ const JobCard = React.memo(function JobCard({
               <Icon name="play" />
             </button>
           ) : null}
+          {(waitingRetry || endedByCrawlFailure) && (
+            <button
+              className="btn sm"
+              title={waitingRetry ? `${retryTime} 확인 예정을 기다리지 않고 지금 목록 페이지를 다시 읽습니다` : '실패했던 목록 페이지부터 강제로 이어서 읽습니다'}
+              onClick={() => void act(() => window.api.batch.continueNow(job.id))}
+            >
+              {waitingRetry ? '지금 다시 확인' : '강제로 이어서'}
+            </button>
+          )}
           {(job.status === 'running' || c.queued + c.downloading + c.paused > 0) && (
             <button className="icon-btn" title="중지 (이 작업의 진행 중 다운로드도 취소)" onClick={() => void act(() => window.api.batch.stop(job.id))}>
               <Icon name="stop" />
@@ -439,7 +453,7 @@ const JobCard = React.memo(function JobCard({
       <div className="stats">
         <span>
           페이지 {job.pages.scanned}
-          {job.pages.done ? '' : job.status === 'running' ? ' (계속 확인 중)' : ' (남은 페이지 있음)'}
+          {job.pages.done ? '' : job.status === 'running' ? (waitingRetry ? ` (읽기 실패 · ${retryTime}에 다시 확인)` : ' (계속 확인 중)') : ' (남은 페이지 있음)'}
         </span>
         <span>발견 {c.total}</span>
         <span className="ok">완료 {c.completed}</span>
